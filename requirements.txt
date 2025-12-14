@@ -1,0 +1,28 @@
+# Core
+python-telegram-bot==20.7
+python-dotenv==1.0.0
+supabase==2.3.0
+
+# Database
+sqlalchemy==2.0.23
+aiosqlite==0.19.0
+
+# PDF Processing
+PyMuPDF==1.23.7
+Pillow==10.1.0
+
+# Search
+whoosh==2.7.4
+
+# AI/Embeddings (optional - for semantic search)
+sentence-transformers==2.2.2
+
+# OCR (optional - for scanned books)
+pytesseract==0.3.10
+
+# HTTP requests for resource finding
+aiohttp==3.9.1
+beautifulsoup4==4.12.2
+
+# Utilities
+tqdm==4.66.1
