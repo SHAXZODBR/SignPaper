@@ -4,6 +4,7 @@ Generates summaries and quizzes using Groq API (FREE) with Llama models.
 """
 import os
 import re
+import time
 from groq import Groq
 from typing import Optional
 from dotenv import load_dotenv
@@ -12,6 +13,10 @@ load_dotenv()
 
 # Configure Groq (FREE tier available)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+
+# Rate limiting - track last request time
+_last_request_time = 0
+_min_request_interval = 3  # Minimum 3 seconds between requests
 
 # Initialize client
 _client = None
@@ -31,6 +36,23 @@ def get_client():
         _client = Groq(api_key=GROQ_API_KEY)
     
     return _client
+
+
+def check_rate_limit():
+    """Check if we should wait before making a request. Returns wait time or 0."""
+    global _last_request_time
+    now = time.time()
+    elapsed = now - _last_request_time
+    
+    if elapsed < _min_request_interval:
+        return _min_request_interval - elapsed
+    return 0
+
+
+def update_rate_limit():
+    """Update the last request time."""
+    global _last_request_time
+    _last_request_time = time.time()
 
 
 def generate_summary(
@@ -117,16 +139,17 @@ Xulosa:"""
 def generate_quiz(
     content: str,
     theme_name: str,
-    num_questions: int = 10,
+    num_questions: int = 5,  # Reduced from 10 for faster generation
     language: str = "uz"
 ) -> Optional[str]:
     """
     Generate quiz questions from chapter content with spoilered answers.
+    OPTIMIZED for speed - uses 5 questions by default.
     
     Args:
         content: The chapter text content
         theme_name: Name of the theme/chapter
-        num_questions: Number of questions to generate (default 10)
+        num_questions: Number of questions to generate (default 5 for speed)
         language: 'uz' for Uzbek, 'ru' for Russian
     
     Returns:
@@ -135,70 +158,63 @@ def generate_quiz(
     if not content or len(content) < 100:
         return None
     
+    # Check rate limit
+    wait_time = check_rate_limit()
+    if wait_time > 0:
+        time.sleep(wait_time)
+    
     try:
         client = get_client()
         
-        max_chars = 8000
+        # Reduce content size for faster processing
+        max_chars = 4000  # Reduced from 8000
         if len(content) > max_chars:
             content = content[:max_chars] + "..."
         
         if language == "ru":
-            prompt = f"""Создайте ровно {num_questions} тестовых вопросов по следующей главе учебника.
-
-Глава: {theme_name}
+            prompt = f"""Создайте {num_questions} тестовых вопросов по главе "{theme_name}".
 
 Содержание:
 {content}
 
-ВАЖНЫЕ ТРЕБОВАНИЯ:
-1. Создайте ровно {num_questions} вопросов
-2. Каждый вопрос должен иметь 4 варианта ответа (A, B, C, D)
-3. Только один ответ правильный
-4. Вопросы должны проверять понимание материала
+ФОРМАТ (строго соблюдайте):
 
-СТРОГИЙ ФОРМАТ:
-
-1️⃣ [Текст вопроса]
+1️⃣ [Вопрос]
 A) [вариант]
 B) [вариант]
 C) [вариант]
 D) [вариант]
-💡 Ответ: [БУКВА]
+💡 Ответ: [A/B/C/D]
 
-(продолжайте до {num_questions})"""
+(повторите для всех {num_questions} вопросов)"""
         else:
-            prompt = f"""Quyidagi darslik bobi bo'yicha aniq {num_questions} ta test savoli tuzing.
-
-Bob: {theme_name}
+            prompt = f""""{theme_name}" mavzusi bo'yicha {num_questions} ta test savoli tuzing.
 
 Mazmun:
 {content}
 
-MUHIM TALABLAR:
-1. Aniq {num_questions} ta savol tuzing
-2. Har bir savolda 4 ta javob varianti bo'lsin (A, B, C, D)
-3. Faqat bitta to'g'ri javob bo'lsin
-4. Savollar materialni tushunishni tekshirsin
+FORMAT (qat'iy rioya qiling):
 
-QATIY FORMAT:
-
-1️⃣ [Savol matni]
+1️⃣ [Savol]
 A) [variant]
 B) [variant]
 C) [variant]
 D) [variant]
-💡 Javob: [HARF]
+💡 Javob: [A/B/C/D]
 
-({num_questions} tagacha davom eting)"""
+(barcha {num_questions} ta savol uchun takrorlang)"""
 
+        # Update rate limit tracker
+        update_rate_limit()
+        
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.1-8b-instant",  # Fast model
             messages=[
-                {"role": "system", "content": "You are a helpful educational assistant that creates quizzes in Uzbek or Russian as requested."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=4000,
-            temperature=0.7
+            max_tokens=2000,  # Reduced from 4000
+            temperature=0.5,  # Lower for more consistent output
+            timeout=15.0  # 15 second timeout to avoid long waits
         )
         
         if response.choices and response.choices[0].message.content:
@@ -208,6 +224,9 @@ D) [variant]
         return None
         
     except Exception as e:
+        error_msg = str(e).lower()
+        if "rate" in error_msg or "429" in error_msg:
+            return "RATE_LIMITED"
         print(f"Error generating quiz: {e}")
         return None
 

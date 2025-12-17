@@ -135,6 +135,15 @@ class SearchEngine:
         
         return added
     
+    def detect_language(self, text: str) -> str:
+        """Detect if text is Russian (Cyrillic) or Uzbek (Latin)."""
+        cyrillic_count = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
+        latin_count = sum(1 for c in text if 'a' <= c.lower() <= 'z')
+        
+        if cyrillic_count > latin_count:
+            return 'ru'
+        return 'uz'
+    
     def search(
         self, 
         query: str, 
@@ -146,6 +155,7 @@ class SearchEngine:
         Search for themes matching the query.
         Searches BOTH theme names AND content directly from database.
         Ranking: exact name match > partial name match > content match
+        LANGUAGE-AWARE: Russian queries prioritize Russian results
         
         Args:
             query: Search query (works in both Uzbek and Russian)
@@ -162,6 +172,7 @@ class SearchEngine:
         try:
             results = []
             query_lower = query.lower().strip()
+            query_lang = self.detect_language(query)
             
             session = get_session()
             themes = session.query(Theme).all()
@@ -175,7 +186,9 @@ class SearchEngine:
                 # Check for matches in name or content
                 in_name_uz = query_lower in name_uz
                 in_name_ru = query_lower in name_ru
-                in_content = query_lower in content_uz or query_lower in content_ru
+                in_content_uz = query_lower in content_uz
+                in_content_ru = query_lower in content_ru
+                in_content = in_content_uz or in_content_ru
                 
                 # Skip if no match anywhere
                 if not (in_name_uz or in_name_ru or in_content):
@@ -190,8 +203,18 @@ class SearchEngine:
                 if subject and book and subject.lower() not in (book.subject or '').lower():
                     continue
                 
-                # Calculate score based on match type
+                # Calculate score based on match type AND language preference
                 score = 0
+                lang_bonus = 0
+                
+                # Language bonus: prefer results in the same language as query
+                if query_lang == 'ru':
+                    if in_name_ru or in_content_ru:
+                        lang_bonus = 500  # Boost Russian results for Russian queries
+                else:
+                    if in_name_uz or in_content_uz:
+                        lang_bonus = 500  # Boost Uzbek results for Uzbek queries
+                
                 if name_uz == query_lower or name_ru == query_lower:
                     score = 10000  # Exact full name match - HIGHEST
                 elif name_uz.startswith(query_lower) or name_ru.startswith(query_lower):
@@ -200,6 +223,13 @@ class SearchEngine:
                     score = 1000   # Query found in name
                 elif in_content:
                     score = 100    # Query found in content only
+                
+                score += lang_bonus
+                
+                # Determine which language had the match
+                match_lang = 'uz'
+                if in_name_ru or in_content_ru:
+                    match_lang = 'ru'
                 
                 results.append({
                     'theme_id': theme.id,
@@ -213,7 +243,9 @@ class SearchEngine:
                     'start_page': theme.start_page,
                     'end_page': theme.end_page,
                     'score': score,
-                    'match_type': 'name' if (in_name_uz or in_name_ru) else 'content'
+                    'match_type': 'name' if (in_name_uz or in_name_ru) else 'content',
+                    'match_lang': match_lang,
+                    'query_lang': query_lang
                 })
             
             # Sort by score (descending) and limit

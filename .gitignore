@@ -68,6 +68,9 @@ venv.bak/
 *.sqlite3
 data/*.db
 
+# Books folder (1.2GB - too large for GitHub)
+books/
+
 # PDF output files
 output/
 *.pdf

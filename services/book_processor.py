@@ -20,6 +20,7 @@ class BookProcessor:
     
     # Subject name mappings (folder name -> subject code)
     SUBJECT_MAPPING = {
+        # Uzbek/Latin
         'matematika': 'matematika',
         'math': 'matematika',
         'biologiya': 'biologiya',
@@ -39,6 +40,14 @@ class BookProcessor:
         'ona_tili': 'ona_tili',
         'rus_tili': 'rus_tili',
         'ingliz_tili': 'ingliz_tili',
+        # Russian/Cyrillic
+        'математика': 'matematika',
+        'биология': 'biologiya',
+        'физика': 'fizika',
+        'химия': 'kimyo',
+        'география': 'geografiya',
+        'история': 'tarix',
+        'информатика': 'informatika',
     }
     
     def __init__(self):
@@ -170,24 +179,30 @@ class BookProcessor:
         
         print(f"  Subject: {subject}, Grade: {grade}")
         
-        # Check if book exists
-        existing = self.session.query(Book).filter(
-            Book.subject == subject,
-            Book.grade == grade
-        ).first()
+        # Check if this specific PDF file already exists
+        if language == 'uz':
+            existing = self.session.query(Book).filter(
+                Book.pdf_path_uz == str(pdf_path)
+            ).first()
+        else:
+            existing = self.session.query(Book).filter(
+                Book.pdf_path_ru == str(pdf_path)
+            ).first()
         
         if existing:
-            # Update paths
+            # Update existing book
             if language == 'uz':
-                existing.pdf_path_uz = str(pdf_path)
                 existing.title_uz = title
+                existing.subject = subject
+                existing.grade = grade
             else:
-                existing.pdf_path_ru = str(pdf_path)
                 existing.title_ru = title
+                existing.subject = subject
+                existing.grade = grade
             self.session.commit()
             book = existing
         else:
-            # Create new book
+            # Create new book for this PDF
             book = Book(
                 title_uz=title if language == 'uz' else None,
                 title_ru=title if language == 'ru' else None,
@@ -280,6 +295,9 @@ def main():
     print(f"   Books: {stats['books']}")
     print(f"   Themes: {stats['themes']}")
     print(f"   Resources: {stats['resources']}")
+    
+    # Force clean exit to avoid PyMuPDF segfault during cleanup
+    os._exit(0)
 
 
 if __name__ == "__main__":

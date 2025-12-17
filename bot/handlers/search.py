@@ -49,6 +49,9 @@ async def perform_search(update: Update, query: str, from_callback: bool = False
         )
         return
     
+    # Detect query language for display
+    query_lang = results[0].get('query_lang', 'uz') if results else 'uz'
+    
     # Create response message
     response_lines = [f"🔍 Results for: {query}\n"]
     
@@ -59,8 +62,15 @@ async def perform_search(update: Update, query: str, from_callback: bool = False
         theme = session.query(Theme).filter(Theme.id == theme_id).first()
         if theme:
             book = session.query(Book).filter(Book.id == theme.book_id).first()
-            name = theme.name_uz or theme.name_ru or 'Unknown'
-            book_title = book.title_uz or book.title_ru or 'Unknown' if book else 'Unknown'
+            
+            # Show name in the query language
+            if query_lang == 'ru':
+                name = theme.name_ru or theme.name_uz or 'Unknown'
+                book_title = book.title_ru or book.title_uz or 'Unknown' if book else 'Unknown'
+            else:
+                name = theme.name_uz or theme.name_ru or 'Unknown'
+                book_title = book.title_uz or book.title_ru or 'Unknown' if book else 'Unknown'
+            
             grade = book.grade if book else ''
             
             response_lines.append(
@@ -74,7 +84,11 @@ async def perform_search(update: Update, query: str, from_callback: bool = False
         theme_id = result.get('theme_id')
         theme = session.query(Theme).filter(Theme.id == theme_id).first()
         if theme:
-            name = theme.name_uz or theme.name_ru or 'Theme'
+            # Show button text in query language
+            if query_lang == 'ru':
+                name = theme.name_ru or theme.name_uz or 'Theme'
+            else:
+                name = theme.name_uz or theme.name_ru or 'Theme'
             name = name[:30] + '...' if len(name) > 30 else name
             keyboard.append([
                 InlineKeyboardButton(
@@ -89,6 +103,7 @@ async def perform_search(update: Update, query: str, from_callback: bool = False
         '\n'.join(response_lines),
         reply_markup=reply_markup
     )
+
 
 
 async def handle_theme_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -110,40 +125,70 @@ async def handle_theme_selection(update: Update, context: ContextTypes.DEFAULT_T
         return
     
     book = session.query(Book).filter(Book.id == theme.book_id).first()
-    
-    # Create theme details message
-    name_uz = theme.name_uz or "-"
-    name_ru = theme.name_ru or "-"
-    book_title = book.title_uz or book.title_ru or "Unknown Book" if book else "Unknown Book"
-    grade = book.grade if book else '?'
     book_id = book.id if book else 0
+    grade = book.grade if book else '?'
     
-    response = (
-        f"📖 Theme Details\n\n"
-        f"🇺🇿 O'zbekcha: {name_uz}\n"
-        f"🇷🇺 Русский: {name_ru}\n\n"
-        f"📚 Book: {book_title}\n"
-        f"📊 Grade: {grade}\n"
-        f"📄 Pages: {theme.start_page or 0} - {theme.end_page or 0}\n"
-    )
+    # Detect language from theme content - if has Uzbek content, show Uzbek; if Russian, show Russian
+    has_uz = bool(theme.name_uz and theme.content_uz)
+    has_ru = bool(theme.name_ru and theme.content_ru)
     
-    # Create action buttons
+    # Determine which language to show based on what's available
+    # Prioritize Uzbek if both available (since book structure is uzbek/russian folders)
+    if has_uz:
+        show_lang = 'uz'
+        name = theme.name_uz
+        book_title = book.title_uz or book.title_ru or "Unknown Book" if book else "Unknown Book"
+        pdf_path = book.pdf_path_uz if book else None
+    else:
+        show_lang = 'ru'
+        name = theme.name_ru or theme.name_uz or "-"
+        book_title = book.title_ru or book.title_uz or "Unknown Book" if book else "Unknown Book"
+        pdf_path = book.pdf_path_ru if book else None
+    
+    # Create theme details message - show only relevant language
+    if show_lang == 'uz':
+        response = (
+            f"📖 Mavzu tafsilotlari\n\n"
+            f"🇺🇿 {name}\n\n"
+            f"📚 Kitob: {book_title}\n"
+            f"📊 Sinf: {grade}\n"
+            f"📄 Sahifalar: {theme.start_page or 0} - {theme.end_page or 0}\n"
+        )
+    else:
+        response = (
+            f"📖 Детали темы\n\n"
+            f"🇷🇺 {name}\n\n"
+            f"📚 Книга: {book_title}\n"
+            f"📊 Класс: {grade}\n"
+            f"📄 Страницы: {theme.start_page or 0} - {theme.end_page or 0}\n"
+        )
+    
+    # Create action buttons - show ONLY the relevant language PDF button
     keyboard = [
         [
             InlineKeyboardButton("📝 AI Summary", callback_data=f"summary_{theme_id}"),
             InlineKeyboardButton("📋 AI Quiz", callback_data=f"quiz_{theme_id}"),
         ],
-        [
-            InlineKeyboardButton("🇺🇿 PDF (UZ)", callback_data=f"download_uz_{book_id}"),
-            InlineKeyboardButton("🇷🇺 PDF (RU)", callback_data=f"download_ru_{book_id}"),
-        ],
-        [
-            InlineKeyboardButton("📄 Theme PDF (UZ+RU)", callback_data=f"theme_pdf_{theme_id}"),
-        ],
-        [
-            InlineKeyboardButton("🔗 Educational Resources", callback_data=f"resources_{theme_id}"),
-        ]
     ]
+    
+    # Add download button for the relevant language only
+    if show_lang == 'uz' and pdf_path:
+        keyboard.append([
+            InlineKeyboardButton("📥 Kitobni yuklab olish (PDF)", callback_data=f"download_uz_{book_id}"),
+        ])
+    elif show_lang == 'ru' and pdf_path:
+        keyboard.append([
+            InlineKeyboardButton("📥 Скачать книгу (PDF)", callback_data=f"download_ru_{book_id}"),
+        ])
+    
+    # Theme PDF for just this chapter
+    keyboard.append([
+        InlineKeyboardButton("📄 Mavzu PDF" if show_lang == 'uz' else "📄 PDF темы", callback_data=f"theme_pdf_{theme_id}"),
+    ])
+    
+    keyboard.append([
+        InlineKeyboardButton("🔗 Ta'lim resurslari" if show_lang == 'uz' else "🔗 Учебные ресурсы", callback_data=f"resources_{theme_id}"),
+    ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     

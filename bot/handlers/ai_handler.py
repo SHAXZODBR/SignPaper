@@ -114,7 +114,25 @@ async def handle_quiz_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Generate quiz with 5 questions (shorter to fit Telegram limit)
     try:
+        # Send loading message immediately
+        loading_msg = await query.message.reply_text("⏳ Generating 5 quiz questions...")
+        
         quiz = generate_quiz(content, name, num_questions=5, language=language)
+        
+        # Delete loading message
+        try:
+            await loading_msg.delete()
+        except:
+            pass
+        
+        # Check for rate limit
+        if quiz == "RATE_LIMITED":
+            await query.message.reply_text(
+                "⚠️ AI is busy! Too many requests.\n\n"
+                "Please wait 30 seconds and try again.\n"
+                "The free AI API has usage limits."
+            )
+            return
         
         if quiz:
             # Escape HTML special characters (except our spoiler tags)

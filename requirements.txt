@@ -1,7 +1,7 @@
 # Core
-python-telegram-bot==20.7
+python-telegram-bot>=21.0
 python-dotenv==1.0.0
-supabase==2.3.0
+supabase>=2.10.0
 
 # Database
 sqlalchemy==2.0.23
@@ -17,8 +17,12 @@ whoosh==2.7.4
 # AI/Embeddings (optional - for semantic search)
 sentence-transformers==2.2.2
 
+# AI Summary (Groq)
+groq
+
 # OCR (optional - for scanned books)
 pytesseract==0.3.10
+pdf2image
 
 # HTTP requests for resource finding
 aiohttp==3.9.1
