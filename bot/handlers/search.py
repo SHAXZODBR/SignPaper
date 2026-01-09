@@ -32,7 +32,8 @@ except ImportError:
     from database.models import get_theme as get_theme_by_id, get_book as get_book_by_id
 
 # Initialize local search engine as fallback
-search_engine = SearchEngine()
+from services.search_engine import get_search_engine
+search_engine = get_search_engine()
 
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
