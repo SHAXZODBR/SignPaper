@@ -12,6 +12,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ConversationHandler,
     filters,
+    ContextTypes,
 )
 import sys
 sys.path.append('..')
@@ -51,13 +52,15 @@ from bot.handlers.support import (
     myid_command,
     reply_command,
     WAITING_FOR_MESSAGE,
+    ADMIN_CHAT_ID,
 )
 
 # Import analytics and settings
 try:
     from database.supabase_client import (
         track_user_action, track_download,
-        get_user_lang, set_user_lang
+        get_user_lang, set_user_lang,
+        get_stats
     )
     ANALYTICS_AVAILABLE = True
 except ImportError:
@@ -65,6 +68,7 @@ except ImportError:
     # Fallback if Supabase client not fully updated
     def get_user_lang(uid): return 'uz'
     def set_user_lang(uid, lang): return False
+    def get_stats(): return {}
 
 from bot.translations import get_text
 
@@ -144,16 +148,8 @@ async def lang_command(update: Update, context) -> None:
         parse_mode='Markdown'
     )
 
-async def handle_rating(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle rating button click."""
-    query = update.callback_query
-    lang = get_user_lang(update.effective_user.id)
-    await query.answer(get_text('thank_you_feedback', lang))
-    
-    rating = query.data.replace("rate_", "")
-    # Save rating logic here if needed
-    
-    await query.message.edit_text(get_text('feedback_received', lang, rating=rating))
+ 
+ 
 
 
 async def set_language_handler(update: Update, context) -> None:
