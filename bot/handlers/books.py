@@ -266,12 +266,12 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
         )
     
     # Try to get PDF URL from Supabase Storage first
-    pdf_url = book.pdf_url_uz if language == 'uz' else book.pdf_url_ru
+    pdf_url = book.pdf_path_uz if language == 'uz' else book.pdf_path_ru
     actual_lang = language
     
     # Fallback to other language URL if not available
     if not pdf_url:
-        alt_url = book.pdf_url_ru if language == 'uz' else book.pdf_url_uz
+        alt_url = book.pdf_path_ru if language == 'uz' else book.pdf_path_uz
         if alt_url:
             pdf_url = alt_url
             actual_lang = 'ru' if language == 'uz' else 'uz'

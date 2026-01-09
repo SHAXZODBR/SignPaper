@@ -229,8 +229,8 @@ async def handle_theme_selection(update: Update, context: ContextTypes.DEFAULT_T
     has_ru = bool(theme.name_ru)
     
     # Check if PDF URLs are available (Supabase) or local paths
-    has_uz_pdf = bool(book and (book.pdf_url_uz or book.pdf_path_uz)) if book else False
-    has_ru_pdf = bool(book and (book.pdf_url_ru or book.pdf_path_ru)) if book else False
+    has_uz_pdf = bool(book and book.pdf_path_uz) if book else False
+    has_ru_pdf = bool(book and book.pdf_path_ru) if book else False
     
     # Determine display language based on what's available
     if has_uz:
