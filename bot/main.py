@@ -83,7 +83,7 @@ logger = logging.getLogger(__name__)
 # PROFESSIONAL WELCOME MESSAGE
 # ═══════════════════════════════════════════════════════════════════════════
 
-async def start_command(update: Update, context) -> None:
+async def start_command(update: Update, context, from_callback: bool = False) -> None:
     """Handle /start command with professional welcome."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     
@@ -123,11 +123,25 @@ async def start_command(update: Update, context) -> None:
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
-        welcome_message, 
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
+    if from_callback and update.callback_query:
+        await update.callback_query.message.edit_text(
+            welcome_message,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    elif update.message:
+        await update.message.reply_text(
+            welcome_message, 
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    else:
+        # Fallback
+        await update.effective_message.reply_text(
+            welcome_message,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
 
 
 async def lang_command(update: Update, context) -> None:
@@ -170,7 +184,7 @@ async def set_language_handler(update: Update, context) -> None:
     )
     
     # Trigger start command logic after a short delay or just show menu
-    await start_command(update, context)
+    await start_command(update, context, from_callback=True)
 
 
 async def help_command(update: Update, context) -> None:
