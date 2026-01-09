@@ -74,6 +74,7 @@ books/
 # PDF output files
 output/
 *.pdf
+!assets/large_books/*.pdf
 
 # Logs
 *.log
