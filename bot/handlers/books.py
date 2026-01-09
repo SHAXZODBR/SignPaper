@@ -172,31 +172,31 @@ async def handle_book_selection(update: Update, context: ContextTypes.DEFAULT_TY
     )
     
     # Book details text
-    title = book.title_uz if lang == 'uz' else book.title_ru
-    title = title or book.title_uz or book.title_ru
+    title = book.get('title_uz') if lang == 'uz' else book.get('title_ru')
+    title = title or book.get('title_uz') or book.get('title_ru')
     
-    text = get_text('book_details', lang, title=title, grade=book.grade, subject=book.subject, themes_count=len(themes))
+    text = get_text('book_details', lang, title=title, grade=book.get('grade'), subject=book.get('subject'), themes_count=len(themes))
     
     keyboard = []
     # Themes list (first 15 for brevity, can implement pagination later)
     for theme in themes[:15]:
-        name = theme.name_uz if lang == 'uz' else theme.name_ru
-        name = name or theme.name_uz or theme.name_ru
+        name = theme.get('name_uz') if lang == 'uz' else theme.get('name_ru')
+        name = name or theme.get('name_uz') or theme.get('name_ru')
         name = name[:35] + '...' if len(name) > 35 else name
-        keyboard.append([InlineKeyboardButton(f"📑 {name}", callback_data=f"theme_{theme.id}")])
+        keyboard.append([InlineKeyboardButton(f"📑 {name}", callback_data=f"theme_{theme['id']}")])
     
     # PDF download buttons - check if available for current language
-    has_pdf = (lang == 'uz' and book.pdf_path_uz) or (lang == 'ru' and book.pdf_path_ru)
+    has_pdf = (lang == 'uz' and book.get('pdf_path_uz')) or (lang == 'ru' and book.get('pdf_path_ru'))
     if has_pdf:
-        keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', lang), callback_data=f"dl_book_{book.id}_{lang}")])
+        keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', lang), callback_data=f"dl_book_{book['id']}_{lang}")])
     
     # Add alternative language PDF if available
     alt_lang = 'ru' if lang == 'uz' else 'uz'
-    has_alt_pdf = (alt_lang == 'uz' and book.pdf_path_uz) or (alt_lang == 'ru' and book.pdf_path_ru)
+    has_alt_pdf = (alt_lang == 'uz' and book.get('pdf_path_uz')) or (alt_lang == 'ru' and book.get('pdf_path_ru'))
     if has_alt_pdf:
-        keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', alt_lang), callback_data=f"dl_book_{book.id}_{alt_lang}")])
+        keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', alt_lang), callback_data=f"dl_book_{book['id']}_{alt_lang}")])
 
-    keyboard.append([InlineKeyboardButton(get_text('back', lang), callback_data=f"grade_{book.grade}-{book.grade}")]) # Go back to specific grade range
+    keyboard.append([InlineKeyboardButton(get_text('back', lang), callback_data=f"grade_{book.get('grade')}-{book.get('grade')}")]) # Go back to specific grade range
     
     await query.message.edit_text(
         text,
@@ -240,20 +240,20 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
     )
     
     # Try to get PDF URL from Supabase Storage first
-    pdf_url = book.pdf_path_uz if language == 'uz' else book.pdf_path_ru
+    pdf_url = book.get('pdf_path_uz') if language == 'uz' else book.get('pdf_path_ru')
     actual_lang = language
     
     # Fallback to other language URL if not available
     if not pdf_url:
-        alt_url = book.pdf_path_ru if language == 'uz' else book.pdf_path_uz
+        alt_url = book.get('pdf_path_ru') if language == 'uz' else book.get('pdf_path_uz')
         if alt_url:
             pdf_url = alt_url
             actual_lang = 'ru' if language == 'uz' else 'uz'
     
     # If we have a Supabase URL, download and send the file directly
     if pdf_url and pdf_url.startswith('http'):
-        title = book.title_uz if actual_lang == 'uz' else book.title_ru
-        title = title or book.title_ru or book.title_uz or book.subject
+        title = book.get('title_uz') if actual_lang == 'uz' else book.get('title_ru')
+        title = title or book.get('title_ru') or book.get('title_uz') or book.get('subject')
         lang_emoji = "🇺🇿" if actual_lang == 'uz' else "🇷🇺"
         
         # Send loading message
@@ -281,7 +281,7 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
                         await query.message.reply_document(
                             document=pdf_file,
                             filename=f"{title}.pdf",
-                            caption=get_text("book_pdf_caption", user_lang, lang_emoji=lang_emoji, title=title, grade=book.grade, subject=book.subject),
+                            caption=get_text("book_pdf_caption", user_lang, lang_emoji=lang_emoji, title=title, grade=book.get('grade'), subject=book.get('subject')),
                             read_timeout=120,
                             write_timeout=120
                         )
@@ -307,13 +307,13 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
             return
     
     # Fallback to local file paths
-    pdf_path = book.pdf_path_uz if language == 'uz' else book.pdf_path_ru
+    pdf_path = book.get('pdf_path_uz') if language == 'uz' else book.get('pdf_path_ru')
     actual_lang = language
     
     # Fallback to other language if not available
-    if not pdf_path or not Path(pdf_path).exists():
-        alt_path = book.pdf_path_ru if language == 'uz' else book.pdf_path_uz
-        if alt_path and Path(alt_path).exists():
+    if not pdf_path or not (isinstance(pdf_path, str) and Path(pdf_path).exists()):
+        alt_path = book.get('pdf_path_ru') if language == 'uz' else book.get('pdf_path_uz')
+        if alt_path and isinstance(alt_path, str) and Path(alt_path).exists():
             pdf_path = alt_path
             actual_lang = 'ru' if language == 'uz' else 'uz'
         else:
@@ -329,7 +329,7 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
         await query.message.reply_document(
             document=open(pdf_path, 'rb'),
             filename=f"{title}.pdf",
-            caption=get_text("book_pdf_caption", user_lang, lang_emoji=lang_emoji, title=title, grade=book.grade, subject=book.subject),
+            caption=get_text("book_pdf_caption", user_lang, lang_emoji=lang_emoji, title=title, grade=book.get('grade'), subject=book.get('subject')),
             read_timeout=120,
             write_timeout=120
         )
@@ -374,24 +374,24 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
         await query.message.reply_text(get_text("theme_not_found", user_lang))
         return
     
-    print(f"[PDF DEBUG] Theme: {theme.name_uz}, Pages: {theme.start_page}-{theme.end_page}")
+    print(f"[PDF DEBUG] Theme: {theme.get('name_uz')}, Pages: {theme.get('start_page')}-{theme.get('end_page')}")
     
-    book = get_book_by_id(theme.book_id)
+    book = get_book_by_id(theme.get('book_id'))
     
     if not book:
         print(f"[PDF DEBUG] Book not found")
         await query.message.reply_text(get_text("book_not_found", user_lang))
         return
     
-    print(f"[PDF DEBUG] Book: {book.title_uz}, PDF UZ: {book.pdf_path_uz}")
+    print(f"[PDF DEBUG] Book: {book.get('title_uz')}, PDF UZ: {book.get('pdf_path_uz')}")
     
     # Determine which PDF to use
     if req_lang == 'uz':
-        pdf_path = book.pdf_path_uz
+        pdf_path = book.get('pdf_path_uz')
         lang_name = get_text("uzbek_language", user_lang)
         emoji = "🇺🇿"
     else:
-        pdf_path = book.pdf_path_ru
+        pdf_path = book.get('pdf_path_ru')
         lang_name = get_text("russian_language", user_lang)
         emoji = "🇷🇺"
     
@@ -507,22 +507,22 @@ async def handle_themes_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.message.edit_text(get_text('theme_not_found', lang))
         return
     
-    book = get_book_by_id(theme.book_id)
+    book = get_book_by_id(theme.get('book_id'))
     if not book:
         await query.message.edit_text(get_text('book_not_found', lang))
         return
 
-    theme_name = theme.name_uz if lang == 'uz' else theme.name_ru
-    theme_name = theme_name or theme.name_uz or theme.name_ru
+    theme_name = theme.get('name_uz') if lang == 'uz' else theme.get('name_ru')
+    theme_name = theme_name or theme.get('name_uz') or theme.get('name_ru')
 
-    book_title = book.title_uz if lang == 'uz' else book.title_ru
-    book_title = book_title or book.title_uz or book.title_ru
+    book_title = book.get('title_uz') if lang == 'uz' else book.get('title_ru')
+    book_title = book_title or book.get('title_uz') or book.get('title_ru')
 
-    text = get_text('theme_details', lang, theme_name=theme_name, book_title=book_title, start_page=(theme.start_page or 0) + 1, end_page=(theme.end_page or 0) + 1)
+    text = get_text('theme_details', lang, theme_name=theme_name, book_title=book_title, start_page=(theme.get('start_page') or 0) + 1, end_page=(theme.get('end_page') or 0) + 1)
 
     keyboard = [
         [InlineKeyboardButton(get_text('download_theme_pdf', lang), callback_data=f"theme_pdf_{lang}_{theme_id}")],
-        [InlineKeyboardButton(get_text('back', lang), callback_data=f"book_{book.id}")]
+        [InlineKeyboardButton(get_text('back', lang), callback_data=f"book_{book.get('id')}")]
     ]
 
     await query.message.edit_text(

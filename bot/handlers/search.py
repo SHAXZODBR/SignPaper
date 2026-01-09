@@ -200,9 +200,9 @@ async def handle_theme_selection(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(get_text('theme_not_found', lang))
         return
     
-    book = get_book_by_id(theme.book_id)
-    book_id = book.id if book else 0
-    grade = book.grade if book else '?'
+    book = get_book_by_id(theme['book_id'])
+    book_id = book['id'] if book else 0
+    grade = book['grade'] if book else '?'
     
     # Track analytics
     track_user_action(
@@ -210,24 +210,24 @@ async def handle_theme_selection(update: Update, context: ContextTypes.DEFAULT_T
         action_type="view_theme",
         telegram_username=update.effective_user.username,
         first_name=update.effective_user.first_name,
-        action_data={"theme_id": theme_id, "book_id": theme.book_id, "language": lang}
+        action_data={"theme_id": theme_id, "book_id": theme['book_id'], "language": lang}
     )
 
-    theme_name = theme.name_uz if lang == 'uz' else theme.name_ru
-    theme_name = theme_name or theme.name_uz or theme.name_ru
+    theme_name = theme.get('name_uz') if lang == 'uz' else theme.get('name_ru')
+    theme_name = theme_name or theme.get('name_uz') or theme.get('name_ru')
     
-    book_title = book.title_uz if lang == 'uz' else book.title_ru
-    book_title = book_title or book.title_uz or book.title_ru
+    book_title = book.get('title_uz') if lang == 'uz' else book.get('title_ru')
+    book_title = book_title or book.get('title_uz') or book.get('title_ru')
     
     # Create theme details message
-    start_page = theme.start_page or 0
-    end_page = theme.end_page or 0
+    start_page = theme.get('start_page') or 0
+    end_page = theme.get('end_page') or 0
     
     response = get_text('theme_details_full', lang, 
                         theme_name=theme_name, 
                         book_title=book_title, 
                         grade=grade,
-                        subject=book.subject if book else "?",
+                        subject=book.get('subject') if book else "?",
                         start_page=start_page+1, 
                         end_page=end_page+1)
     
@@ -241,8 +241,8 @@ async def handle_theme_selection(update: Update, context: ContextTypes.DEFAULT_T
     ])
     
     # Check if PDF URLs are available
-    has_uz_pdf = bool(book and book.pdf_path_uz)
-    has_ru_pdf = bool(book and book.pdf_path_ru)
+    has_uz_pdf = bool(book and book.get('pdf_path_uz'))
+    has_ru_pdf = bool(book and book.get('pdf_path_ru'))
     
     # Download buttons
     download_row = []

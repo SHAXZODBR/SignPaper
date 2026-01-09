@@ -146,6 +146,10 @@ async def receive_support_message(update: Update, context: ContextTypes.DEFAULT_
         parse_mode='Markdown'
     )
     
+    # Re-show menu
+    from bot.main import start_command
+    await start_command(update, context)
+    
     return ConversationHandler.END
 
 
@@ -273,3 +277,7 @@ async def handle_rating(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"✅ Rahmat! Siz {rating} ⭐ baho berdingiz!\n"
         f"✅ Спасибо! Вы поставили {rating} ⭐!"
     )
+    
+    # Re-show menu
+    from bot.main import start_command
+    await start_command(update, context)
