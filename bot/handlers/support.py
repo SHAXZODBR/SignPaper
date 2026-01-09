@@ -9,12 +9,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Import database functions
+# Import translations and user settings
+from bot.translations import get_text
 try:
-    from database.supabase_client import save_support_message, save_feedback
+    from database.supabase_client import save_support_message, save_feedback, get_user_lang
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False
+    def get_user_lang(uid): return 'uz'
 
 # Admin chat ID for receiving support messages (set in .env)
 # Get your ID by sending /myid to the bot
@@ -55,23 +57,30 @@ async def myid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
 
-async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle /support command - start support conversation."""
+async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_callback: bool = False) -> int:
+    """Handle /support command or button click."""
+    lang = get_user_lang(update.effective_user.id)
     keyboard = [
-        [InlineKeyboardButton("❌ Bekor qilish / Cancel", callback_data="cancel_support")]
+        [InlineKeyboardButton(get_text('back', lang), callback_data="back_to_start"),
+         InlineKeyboardButton("❌ " + (get_text('back', lang) if lang == 'uz' else "Отмена"), callback_data="cancel_support")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
+    text = (
         "📞 **Qo'llab-quvvatlash / Support**\n\n"
         "🇺🇿 Savolingiz yoki muammoingizni yozing. "
         "Biz tez orada javob beramiz!\n\n"
         "🇷🇺 Напишите ваш вопрос или проблему. "
         "Мы ответим вам в ближайшее время!\n\n"
-        "✍️ Xabaringizni yozing / Write your message:",
-        parse_mode='Markdown',
-        reply_markup=reply_markup
+        "✍️ Xabaringizni yozing / Write your message:"
     )
+    
+    if from_callback and update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        
     return WAITING_FOR_MESSAGE
 
 
@@ -183,8 +192,9 @@ async def cancel_support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
-async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /feedback command."""
+async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_callback: bool = False) -> None:
+    """Handle /feedback command or button click."""
+    lang = get_user_lang(update.effective_user.id)
     keyboard = [
         [
             InlineKeyboardButton("⭐ 5", callback_data="rate_5"),
@@ -194,17 +204,22 @@ async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         [
             InlineKeyboardButton("⭐ 2", callback_data="rate_2"),
             InlineKeyboardButton("⭐ 1", callback_data="rate_1"),
-        ]
+        ],
+        [InlineKeyboardButton(get_text('back', lang), callback_data="back_to_start")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
+    text = (
         "⭐ **Botni baholang / Rate the bot**\n\n"
         "🇺🇿 Botimizni baholang!\n"
-        "🇷🇺 Оцените нашего бота!",
-        parse_mode='Markdown',
-        reply_markup=reply_markup
+        "🇷🇺 Оцените нашего бота!"
     )
+    
+    if from_callback and update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
 
 async def handle_rating(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -6,6 +6,7 @@ Centralized dictionary for all UI strings in Uzbek and Russian.
 TRANSLATIONS = {
     'uz': {
         'welcome': "👋 Assalomu alaykum, **{name}**!\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n📚 **SignPaper** - O'zbekiston maktab darsliklari\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n✨ **Imkoniyatlar:**\n• 🔍 Mavzularni qidirish\n• 📥 Darsliklarni yuklab olish\n• 🤖 AI bilan test va xulosa\n• 📚 72+ ta darslik\n\n⬇️ **Tilni o'zgartirish uchun /lang buyrug'ini yuboring.**",
+        'welcome_bilingual': "👋 Assalomu alaykum, **{name}**!\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n📚 **SignPaper** - O'zbekiston maktab darsliklari\n📚 **SignPaper** - Школьные учебники Узбекистана\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n✨ **Imkoniyatlar / Features:**\n• 🔍 Mavzularni qidirish\n• 📥 Darsliklarni yuklab olish\n• 🤖 AI bilan test va xulosa\n• 📚 72+ ta darslik\n\n⬇️ **Tez qidirish / Quick Search:**",
         'select_language': "🌐 **Tilni tanlang / Выберите язык**",
         'select_language_prompt': "📚 Kitoblarni ko'rish\n\nTilni tanlang:",
         'lang_changed': "✅ Til o'zgartirildi: **O'zbekcha** 🇺🇿",
@@ -71,6 +72,15 @@ TRANSLATIONS = {
         'russian_language': "Русский",
         'support': "📞 Qo'llab-quvvatlash",
         'feedback': "⭐ Botni baholash",
+        'yordam_support': "📞 Yordam / Support",
+        'baholash': "⭐ Baholash",
+        'kitoblar_books': "📚 Kitoblar / Books",
+        'subject_sonlar': "🔢 Sonlar",
+        'subject_matematika': "📐 Matematika",
+        'subject_kimyo': "🧪 Kimyo",
+        'subject_fizika': "🔬 Fizika",
+        'subject_biologiya': "🧬 Biologiya",
+        'subject_tarix': "📜 Tarix",
     },
     'ru': {
         'welcome': "👋 Здравствуйте, **{name}**!\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n📚 **SignPaper** - Школьные учебники Узбекистана\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n✨ **Возможности:**\n• 🔍 Поиск по темам\n• 📥 Загрузка учебников\n• 🤖 Тесты и краткие содержания от AI\n• 📚 72+ учебника\n\n⬇️ **Для смены языка используйте команду /lang.**",
@@ -139,6 +149,15 @@ TRANSLATIONS = {
         'russian_language': "Русский",
         'support': "📞 Поддержка",
         'feedback': "⭐ Оценить бота",
+        'yordam_support': "📞 Помощь / Support",
+        'baholash': "⭐ Оценить",
+        'kitoblar_books': "📚 Книги / Books",
+        'subject_sonlar': "🔢 Числа",
+        'subject_matematika': "📐 Математика",
+        'subject_kimyo': "🧪 Химия",
+        'subject_fizika': "🔬 Физика",
+        'subject_biologiya': "🧬 Биология",
+        'subject_tarix': "📜 История",
     }
 }
 

@@ -84,7 +84,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════════
 
 async def start_command(update: Update, context, from_callback: bool = False) -> None:
-    """Handle /start command with professional welcome."""
+    """Handle /start command with custom grid menu."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     
     user = update.effective_user
@@ -105,19 +105,29 @@ async def start_command(update: Update, context, from_callback: bool = False) ->
     # Get user language preference
     lang = get_user_lang(user.id)
     
-    welcome_message = get_text('welcome', lang, name=user.first_name)
+    # Use bilingual welcome message
+    welcome_message = get_text('welcome_bilingual', lang, name=user.first_name)
     
+    # Grid layout matching screenshot
     keyboard = [
         [
-            InlineKeyboardButton(f"🇺🇿 O'zbekcha", callback_data="set_lang_uz"),
-            InlineKeyboardButton(f"🇷🇺 Русский", callback_data="set_lang_ru")
+            InlineKeyboardButton(get_text('subject_sonlar', lang), callback_data="search_sonlar"),
+            InlineKeyboardButton(get_text('subject_matematika', lang), callback_data="search_matematika")
         ],
         [
-            InlineKeyboardButton(get_text('browse_books', lang), callback_data="browse_books")
+            InlineKeyboardButton(get_text('subject_kimyo', lang), callback_data="search_kimyo"),
+            InlineKeyboardButton(get_text('subject_fizika', lang), callback_data="search_fizika")
         ],
         [
-            InlineKeyboardButton(get_text('support', lang), callback_data="show_support"),
-            InlineKeyboardButton(get_text('feedback', lang), callback_data="show_feedback")
+            InlineKeyboardButton(get_text('subject_biologiya', lang), callback_data="search_biologiya"),
+            InlineKeyboardButton(get_text('subject_tarix', lang), callback_data="search_tarix")
+        ],
+        [
+            InlineKeyboardButton(get_text('kitoblar_books', lang), callback_data="browse_books")
+        ],
+        [
+            InlineKeyboardButton(get_text('yordam_support', lang), callback_data="show_support"),
+            InlineKeyboardButton(get_text('baholash', lang), callback_data="show_feedback")
         ]
     ]
     
@@ -307,30 +317,11 @@ def main() -> None:
     
     # Support/Feedback from start menu
     async def show_support_menu(update: Update, context):
-        query = update.callback_query
-        lang = get_user_lang(update.effective_user.id)
-        await query.answer()
-        await query.message.reply_text(get_text('support_message', lang), parse_mode='Markdown')
+        await support_command(update, context, from_callback=True)
     application.add_handler(CallbackQueryHandler(show_support_menu, pattern=r"^show_support$"))
     
     async def show_feedback_menu(update: Update, context):
-        query = update.callback_query
-        lang = get_user_lang(update.effective_user.id)
-        await query.answer()
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("⭐ 1", callback_data="rate_1"),
-                InlineKeyboardButton("⭐ 2", callback_data="rate_2"),
-                InlineKeyboardButton("⭐ 3", callback_data="rate_3"),
-                InlineKeyboardButton("⭐ 4", callback_data="rate_4"),
-                InlineKeyboardButton("⭐ 5", callback_data="rate_5")
-            ]
-        ]
-        await query.message.reply_text(
-            get_text('rate_bot', lang),
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await feedback_command(update, context, from_callback=True)
     application.add_handler(CallbackQueryHandler(show_feedback_menu, pattern=r"^show_feedback$"))
     
     # Quick search from start menu
