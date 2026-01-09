@@ -8,35 +8,39 @@ from telegram.ext import ContextTypes
 from pathlib import Path
 import sys
 sys.path.append('../..')
-from database.models import (
-    get_session, Book, Theme,
-    get_book, get_theme, fetch_books_by_grade, fetch_themes_by_book, count_book_themes,
-    use_supabase
-)
+from bot.translations import get_text
+try:
+    from database.supabase_client import (
+        get_all_books, get_books_by_grade, get_book_by_id,
+        track_user_action, track_download, get_user_lang
+    )
+    # Import theme functions
+    from database.supabase_client import get_themes_by_book, get_theme_by_id
+except ImportError:
+    # Fallback to local
+    from database.models import get_all_books, get_books_by_grade, get_book_by_id
+    from database.models import get_themes_by_book, get_theme_by_id
+    def track_user_action(*args, **kwargs): pass
+    def track_download(*args, **kwargs): pass
+    def get_user_lang(uid): return 'uz' # Default to Uzbek if Supabase client not available
+
 from services.pdf_processor import PDFProcessor, create_bilingual_theme_pdf
 from config import OUTPUT_DIR
-
-# Import analytics tracking
-try:
-    from database.supabase_client import track_download, track_user_action
-    ANALYTICS_AVAILABLE = True
-except ImportError:
-    ANALYTICS_AVAILABLE = False
 
 
 async def books_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_callback: bool = False) -> None:
     """Handle /books command - show language selection first."""
+    user_id = update.effective_user.id
+    lang = get_user_lang(user_id)
+
     keyboard = [
-        [InlineKeyboardButton("🇺🇿 O'zbekcha / Uzbek", callback_data="lang_uz")],
-        [InlineKeyboardButton("🇷🇺 Русский / Russian", callback_data="lang_ru")],
+        [InlineKeyboardButton(get_text("lang_uz_button", lang), callback_data="set_lang_uz")],
+        [InlineKeyboardButton(get_text("lang_ru_button", lang), callback_data="set_lang_ru")],
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    message_text = (
-        "📚 Kitoblarni ko'rish / Browse Books\n\n"
-        "Tilni tanlang / Select language:"
-    )
+    message_text = get_text("select_language_prompt", lang)
     
     if from_callback:
         # Called from inline button - edit the existing message
@@ -58,28 +62,26 @@ async def handle_language_selection(update: Update, context: ContextTypes.DEFAUL
     await query.answer()
     
     callback_data = query.data
-    if not callback_data.startswith('lang_'):
+    if not callback_data.startswith('set_lang_'):
         return
     
-    lang = callback_data.replace('lang_', '')  # 'uz' or 'ru'
-    lang_emoji = "🇺🇿" if lang == 'uz' else "🇷🇺"
-    lang_name = "O'zbekcha" if lang == 'uz' else "Русский"
+    lang = callback_data.replace('set_lang_', '')  # 'uz' or 'ru'
+    user_id = update.effective_user.id
     
-    keyboard = []
-    for grade in range(5, 12):
-        keyboard.append([
-            InlineKeyboardButton(f"📚 {grade}-sinf / Grade {grade}", callback_data=f"grade_{lang}_{grade}")
-        ])
-    
-    keyboard.append([InlineKeyboardButton("🔙 Ortga / Back", callback_data="back_languages")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        f"{lang_emoji} {lang_name}\n\n"
-        "Sinfni tanlang / Select grade:",
-        reply_markup=reply_markup
+    # Update user's language preference (assuming this is handled by supabase_client or similar)
+    # For now, we'll just use it for the current session
+    context.user_data['lang'] = lang
+
+    # Track analytics
+    track_user_action(
+        telegram_user_id=user_id,
+        action_type="set_language",
+        telegram_username=update.effective_user.username,
+        first_name=update.effective_user.first_name,
+        action_data={"language": lang}
     )
+    
+    await browse_books(update, context)
 
 
 async def handle_grade_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -91,60 +93,50 @@ async def handle_grade_selection(update: Update, context: ContextTypes.DEFAULT_T
     if not callback_data.startswith('grade_'):
         return
     
-    # Parse lang and grade from callback: grade_uz_5 or grade_ru_5
-    parts = callback_data.split('_')
-    if len(parts) == 3:
-        lang = parts[1]  # 'uz' or 'ru'
-        grade = int(parts[2])
+    user_id = update.effective_user.id
+    lang = get_user_lang(user_id)
+    
+    grade_range_str = callback_data.replace('grade_', '')
+    
+    # Parse grade range (e.g., "1-4", "5-9", "10-11")
+    if '-' in grade_range_str:
+        start_grade, end_grade = map(int, grade_range_str.split('-'))
+        grade_range = list(range(start_grade, end_grade + 1))
     else:
-        # Legacy format: grade_5 (default to uz)
-        lang = 'uz'
-        grade = int(parts[1])
-    
-    lang_emoji = "🇺🇿" if lang == 'uz' else "🇷🇺"
-    
-    # Get books for this grade (uses Supabase or SQLite automatically)
-    books = fetch_books_by_grade(grade, language=lang)
+        grade_range = [int(grade_range_str)] # Should not happen with current buttons
+
+    # Get books for this grade range
+    books = get_books_by_grade(grade_range)
     
     # Track analytics
-    if ANALYTICS_AVAILABLE:
-        user = update.effective_user
-        track_user_action(
-            telegram_user_id=user.id,
-            action_type="browse_grade",
-            telegram_username=user.username,
-            first_name=user.first_name,
-            action_data={"grade": grade, "language": lang}
-        )
+    track_user_action(
+        telegram_user_id=user_id,
+        action_type="browse_grade",
+        telegram_username=update.effective_user.username,
+        first_name=update.effective_user.first_name,
+        action_data={"grade_range": grade_range_str, "language": lang}
+    )
     
     if not books:
-        await query.edit_message_text(
-            f"❌ {grade}-sinf uchun kitoblar topilmadi.\n"
-            f"❌ No books found for Grade {grade}.\n\n"
-            "Books need to be added to the database."
+        await query.message.edit_text(
+            get_text('no_books_found', lang),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(get_text('back', lang), callback_data="browse_books")]])
         )
         return
-    
-    # Create buttons for each book - show title in selected language
+
     keyboard = []
     for book in books:
-        if lang == 'uz':
-            title = book.title_uz or book.title_ru or book.subject
-        else:
-            title = book.title_ru or book.title_uz or book.subject
+        title = book.title_uz if lang == 'uz' else book.title_ru
+        title = title or book.title_uz or book.title_ru
         title = title[:35] + '...' if len(title) > 35 else title
-        keyboard.append([
-            InlineKeyboardButton(f"📖 {title}", callback_data=f"book_{lang}_{book.id}")
-        ])
+        keyboard.append([InlineKeyboardButton(f"📖 {title}", callback_data=f"book_{book.id}")])
     
-    keyboard.append([InlineKeyboardButton("🔙 Ortga / Back", callback_data=f"lang_{lang}")])
+    keyboard.append([InlineKeyboardButton(get_text('back', lang), callback_data="browse_books")])
     
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        f"{lang_emoji} {grade}-sinf / Grade {grade}:\n\n"
-        "Kitobni tanlang / Select a book:",
-        reply_markup=reply_markup
+    await query.message.edit_text(
+        get_text('select_book', lang, grade=grade_range_str),
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
     )
 
 
@@ -157,113 +149,95 @@ async def handle_book_selection(update: Update, context: ContextTypes.DEFAULT_TY
     if not callback_data.startswith('book_'):
         return
     
-    # Parse book_{lang}_{id} format
-    parts = callback_data.split('_')
-    if len(parts) == 3:
-        lang = parts[1]  # 'uz' or 'ru'
-        book_id = int(parts[2])
-    else:
-        # Legacy format: book_{id}
-        lang = 'uz'
-        book_id = int(parts[1])
+    book_id = int(callback_data.replace('book_', ''))
     
-    lang_emoji = "🇺🇿" if lang == 'uz' else "🇷🇺"
+    user_id = update.effective_user.id
+    lang = get_user_lang(user_id)
     
-    # Get book (uses Supabase or SQLite automatically)
-    book = get_book(book_id)
+    book = get_book_by_id(book_id)
     
     if not book:
-        await query.edit_message_text("❌ Kitob topilmadi / Book not found.")
+        await query.message.edit_text(get_text('error_occurred', lang))
         return
-    
-    # Get themes count
-    themes_count = count_book_themes(book_id)
+
+    themes = get_themes_by_book(book_id)
     
     # Track analytics
-    if ANALYTICS_AVAILABLE:
-        user = update.effective_user
-        track_user_action(
-            telegram_user_id=user.id,
-            action_type="view_book",
-            telegram_username=user.username,
-            first_name=user.first_name,
-            action_data={"book_id": book_id, "language": lang}
-        )
+    track_user_action(
+        telegram_user_id=user_id,
+        action_type="view_book",
+        telegram_username=update.effective_user.username,
+        first_name=update.effective_user.first_name,
+        action_data={"book_id": book_id, "language": lang}
+    )
     
-    # Show title in selected language first
-    if lang == 'uz':
-        main_title = book.title_uz or book.title_ru or book.subject
-        alt_title = book.title_ru or '-'
-        response = (
-            f"📖 Kitob ma'lumotlari / Book Details\n\n"
-            f"🇺🇿 {main_title}\n"
-            f"🇷🇺 {alt_title}\n\n"
-            f"📊 Sinf / Grade: {book.grade}\n"
-            f"📚 Fan / Subject: {book.subject}\n"
-            f"📑 Mavzular / Themes: {themes_count}\n"
-        )
-    else:
-        main_title = book.title_ru or book.title_uz or book.subject
-        alt_title = book.title_uz or '-'
-        response = (
-            f"📖 Информация о книге / Book Details\n\n"
-            f"🇷🇺 {main_title}\n"
-            f"🇺🇿 {alt_title}\n\n"
-            f"📊 Класс / Grade: {book.grade}\n"
-            f"📚 Предмет / Subject: {book.subject}\n"
-            f"📑 Темы / Themes: {themes_count}\n"
-        )
+    # Book details text
+    title = book.title_uz if lang == 'uz' else book.title_ru
+    title = title or book.title_uz or book.title_ru
     
-    keyboard = [
-        [InlineKeyboardButton(f"{lang_emoji} Yuklab olish / Download PDF", callback_data=f"download_{lang}_{book_id}")],
-        [InlineKeyboardButton("📑 Mavzular / Themes", callback_data=f"themes_{lang}_{book_id}")],
-        [InlineKeyboardButton("🔙 Ortga / Back", callback_data=f"grade_{lang}_{book.grade}")]
-    ]
+    text = get_text('book_details', lang, title=title, grade=book.grade, subject=book.subject, themes_count=len(themes))
     
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    keyboard = []
+    # Themes list (first 15 for brevity, can implement pagination later)
+    for theme in themes[:15]:
+        name = theme.name_uz if lang == 'uz' else theme.name_ru
+        name = name or theme.name_uz or theme.name_ru
+        name = name[:35] + '...' if len(name) > 35 else name
+        keyboard.append([InlineKeyboardButton(f"📑 {name}", callback_data=f"theme_{theme.id}")])
     
-    await query.edit_message_text(
-        response,
-        reply_markup=reply_markup
+    # PDF download buttons - check if available for current language
+    has_pdf = (lang == 'uz' and book.pdf_path_uz) or (lang == 'ru' and book.pdf_path_ru)
+    if has_pdf:
+        keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', lang), callback_data=f"dl_book_{book.id}_{lang}")])
+    
+    # Add alternative language PDF if available
+    alt_lang = 'ru' if lang == 'uz' else 'uz'
+    has_alt_pdf = (alt_lang == 'uz' and book.pdf_path_uz) or (alt_lang == 'ru' and book.pdf_path_ru)
+    if has_alt_pdf:
+        keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', alt_lang), callback_data=f"dl_book_{book.id}_{alt_lang}")])
+
+    keyboard.append([InlineKeyboardButton(get_text('back', lang), callback_data=f"grade_{book.grade}-{book.grade}")]) # Go back to specific grade range
+    
+    await query.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
     )
 
 
 async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle book PDF download request - supports Supabase Storage URLs and local files."""
     query = update.callback_query
-    await query.answer("Preparing PDF... / PDF tayyorlanmoqda...")
+    user_id = update.effective_user.id
+    user_lang = get_user_lang(user_id)
+    await query.answer(get_text("preparing_pdf", user_lang))
     
     callback_data = query.data
     
     # Determine language and book_id
-    if callback_data.startswith('download_uz_'):
-        book_id = int(callback_data.replace('download_uz_', ''))
-        language = 'uz'
-    elif callback_data.startswith('download_ru_'):
-        book_id = int(callback_data.replace('download_ru_', ''))
-        language = 'ru'
-    elif callback_data.startswith('book_pdf_'):
-        book_id = int(callback_data.replace('book_pdf_', ''))
-        language = 'uz'  # Default to Uzbek
+    if callback_data.startswith('dl_book_'):
+        parts = callback_data.split('_')
+        book_id = int(parts[2])
+        language = parts[3]
     else:
+        # Fallback for legacy or unexpected format
+        await query.message.reply_text(get_text("error_occurred", user_lang))
         return
     
     # Get book using unified data access
-    book = get_book(book_id)
+    book = get_book_by_id(book_id)
     
     if not book:
-        await query.message.reply_text("❌ Kitob topilmadi / Book not found.")
+        await query.message.reply_text(get_text("book_not_found", user_lang))
         return
     
     # Track download analytics
-    if ANALYTICS_AVAILABLE:
-        user = update.effective_user
-        track_download(
-            book_id=book_id,
-            download_type="book_pdf",
-            language=language,
-            telegram_user_id=user.id
-        )
+    track_download(
+        book_id=book_id,
+        download_type="book_pdf",
+        language=language,
+        telegram_user_id=user_id
+    )
     
     # Try to get PDF URL from Supabase Storage first
     pdf_url = book.pdf_path_uz if language == 'uz' else book.pdf_path_ru
@@ -283,7 +257,7 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
         lang_emoji = "🇺🇿" if actual_lang == 'uz' else "🇷🇺"
         
         # Send loading message
-        loading_msg = await query.message.reply_text("⏳ PDF yuklanmoqda... / Loading PDF...")
+        loading_msg = await query.message.reply_text(get_text("loading_pdf", user_lang))
         
         try:
             import aiohttp
@@ -307,7 +281,7 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
                         await query.message.reply_document(
                             document=pdf_file,
                             filename=f"{title}.pdf",
-                            caption=f"{lang_emoji} {title}\n📊 {book.grade}-sinf / Grade {book.grade}\n📁 {book.subject}",
+                            caption=get_text("book_pdf_caption", user_lang, lang_emoji=lang_emoji, title=title, grade=book.grade, subject=book.subject),
                             read_timeout=120,
                             write_timeout=120
                         )
@@ -323,12 +297,11 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
             
             # Show error with direct link as fallback
             keyboard = [[InlineKeyboardButton(
-                f"{lang_emoji} Brauzerda ochish / Open in browser", 
+                get_text("open_in_browser", user_lang, lang_emoji=lang_emoji), 
                 url=pdf_url
             )]]
             await query.message.reply_text(
-                f"❌ PDF yuklashda xatolik: {str(e)[:50]}...\n\n"
-                f"Quyidagi tugmani bosing:",
+                get_text("pdf_download_error_with_link", user_lang, error_message=str(e)[:50]),
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             return
@@ -344,11 +317,7 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
             pdf_path = alt_path
             actual_lang = 'ru' if language == 'uz' else 'uz'
         else:
-            await query.message.reply_text(
-                "❌ PDF fayl topilmadi.\n"
-                "❌ No PDF available for this book.\n\n"
-                "Ma'mur bilan bog'laning / Contact administrator."
-            )
+            await query.message.reply_text(get_text("pdf_file_not_found", user_lang))
             return
     
     # Send the local PDF file
@@ -360,18 +329,20 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
         await query.message.reply_document(
             document=open(pdf_path, 'rb'),
             filename=f"{title}.pdf",
-            caption=f"{lang_emoji} {title} - {book.grade}-sinf / Grade {book.grade}",
+            caption=get_text("book_pdf_caption", user_lang, lang_emoji=lang_emoji, title=title, grade=book.grade, subject=book.subject),
             read_timeout=120,
             write_timeout=120
         )
     except Exception as e:
-        await query.message.reply_text(f"❌ PDF yuborishda xatolik: {str(e)}")
+        await query.message.reply_text(get_text("pdf_sending_error", user_lang, error_message=str(e)))
 
 
 async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle theme PDF download - creates bilingual PDF."""
     query = update.callback_query
-    await query.answer("Generating PDF...")
+    user_id = update.effective_user.id
+    user_lang = get_user_lang(user_id)
+    await query.answer(get_text("generating_pdf", user_lang))
     
     callback_data = query.data
     print(f"[PDF DEBUG] Callback: {callback_data}")
@@ -396,20 +367,20 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
     print(f"[PDF DEBUG] Theme ID: {theme_id}, Lang: {req_lang}")
     
     # Use unified data access
-    theme = get_theme(theme_id)
+    theme = get_theme_by_id(theme_id)
     
     if not theme:
         print(f"[PDF DEBUG] Theme not found")
-        await query.message.reply_text("❌ Theme not found.")
+        await query.message.reply_text(get_text("theme_not_found", user_lang))
         return
     
     print(f"[PDF DEBUG] Theme: {theme.name_uz}, Pages: {theme.start_page}-{theme.end_page}")
     
-    book = get_book(theme.book_id)
+    book = get_book_by_id(theme.book_id)
     
     if not book:
         print(f"[PDF DEBUG] Book not found")
-        await query.message.reply_text("❌ Book not found.")
+        await query.message.reply_text(get_text("book_not_found", user_lang))
         return
     
     print(f"[PDF DEBUG] Book: {book.title_uz}, PDF UZ: {book.pdf_path_uz}")
@@ -417,11 +388,11 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
     # Determine which PDF to use
     if req_lang == 'uz':
         pdf_path = book.pdf_path_uz
-        lang_name = "O'zbekcha"
+        lang_name = get_text("uzbek_language", user_lang)
         emoji = "🇺🇿"
     else:
         pdf_path = book.pdf_path_ru
-        lang_name = "Русский"
+        lang_name = get_text("russian_language", user_lang)
         emoji = "🇷🇺"
     
     print(f"[PDF DEBUG] PDF path: {pdf_path}")
@@ -433,7 +404,7 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
         import tempfile
         
         print(f"[PDF DEBUG] Downloading book PDF from URL for extraction: {pdf_path}")
-        loading_msg = await query.message.reply_text("⏳ Kitob yuklanmoqda (mavzu ajratish uchun)... / Downloading book (for extraction)...")
+        loading_msg = await query.message.reply_text(get_text("downloading_book_for_extraction", user_lang))
         
         try:
             temp_dir = Path("data/temp_books")
@@ -457,12 +428,12 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
             await loading_msg.delete()
         except Exception as e:
             if 'loading_msg' in locals(): await loading_msg.delete()
-            await query.message.reply_text(f"❌ Kitobni yuklab bo'lmadi: {str(e)}")
+            await query.message.reply_text(get_text("book_download_failed", user_lang, error_message=str(e)))
             return
             
     if not pdf_path or not Path(pdf_path).exists():
         print(f"[PDF DEBUG] PDF file not found at: {pdf_path}")
-        await query.message.reply_text(f"❌ {lang_name} PDF topilmadi (file missing).")
+        await query.message.reply_text(get_text("pdf_file_missing", user_lang, lang_name=lang_name))
         return
     
     # Generate filename
@@ -490,11 +461,7 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
                 print(f"[PDF DEBUG] File size: {file_size_mb:.2f} MB")
                 
                 if file_size_mb > 45:
-                    await query.message.reply_text(
-                        f"❌ PDF juda katta ({file_size_mb:.1f} MB).\n"
-                        f"Telegram limiti: 50 MB.\n"
-                        f"Iltimos, kitobni bo'laklarda yuklab oling."
-                    )
+                    await query.message.reply_text(get_text("pdf_too_large", user_lang, file_size=f"{file_size_mb:.1f}"))
                     return
                 
                 start_page = (theme.start_page or 0) + 1
@@ -502,11 +469,7 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
                 await query.message.reply_document(
                     document=open(output_path, 'rb'),
                     filename=output_filename,
-                    caption=(
-                        f"📄 {emoji} {safe_name}\n"
-                        f"Pages: {start_page} - {end_page}\n"
-                        f"📚 {book.title_uz or book.title_ru}"
-                    ),
+                    caption=get_text("theme_pdf_caption", user_lang, emoji=emoji, theme_name=safe_name, start_page=start_page, end_page=end_page, book_title=(book.title_uz if user_lang == 'uz' else book.title_ru)),
                     read_timeout=120,
                     write_timeout=120
                 )
@@ -518,12 +481,11 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
         else:
             print(f"[PDF DEBUG] processor.open() failed")
             
-        await query.message.reply_text("❌ Failed to generate PDF.")
+        await query.message.reply_text(get_text("failed_to_generate_pdf", user_lang))
     except Exception as e:
         print(f"[PDF DEBUG] Exception: {e}")
-        await query.message.reply_text(f"❌ Error: {e}")
+        await query.message.reply_text(get_text("error_message", user_lang, error_message=str(e)))
             
-
 
 
 async def handle_themes_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -532,73 +494,68 @@ async def handle_themes_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     
     callback_data = query.data
-    if not callback_data.startswith('themes_'):
+    if not callback_data.startswith('theme_'): # This callback is for a single theme, not themes list
         return
     
-    # Parse themes_{lang}_{id} format
-    parts = callback_data.split('_')
-    if len(parts) == 3:
-        lang = parts[1]  # 'uz' or 'ru'
-        book_id = int(parts[2])
-    else:
-        # Legacy format: themes_{id}
-        lang = 'uz'
-        book_id = int(parts[1])
-    
-    # Get book and themes (uses Supabase or SQLite automatically)
-    book = get_book(book_id)
-    themes = fetch_themes_by_book(book_id)
-    
-    if not themes:
-        await query.edit_message_text("❌ Mavzular topilmadi / No themes found for this book.")
+    theme_id = int(callback_data.replace('theme_', ''))
+
+    user_id = update.effective_user.id
+    lang = get_user_lang(user_id)
+
+    theme = get_theme_by_id(theme_id)
+    if not theme:
+        await query.message.edit_text(get_text('theme_not_found', lang))
         return
     
-    # Create buttons for first 10 themes - show in selected language
-    keyboard = []
-    for theme in themes[:10]:
-        if lang == 'uz':
-            name = theme.name_uz or theme.name_ru or f"Mavzu {theme.id}"
-        else:
-            name = theme.name_ru or theme.name_uz or f"Тема {theme.id}"
-        name = name[:35] + '...' if len(name) > 35 else name
-        keyboard.append([
-            InlineKeyboardButton(f"📑 {name}", callback_data=f"theme_{theme.id}")
-        ])
-    
-    if len(themes) > 10:
-        keyboard.append([
-            InlineKeyboardButton(f"... va yana {len(themes) - 10} ta / {len(themes) - 10} more", callback_data=f"themes_more_{lang}_{book_id}_10")
-        ])
-    
-    keyboard.append([InlineKeyboardButton("🔙 Ortga / Back", callback_data=f"book_{lang}_{book_id}")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if lang == 'uz':
-        book_title = book.title_uz or book.title_ru or "Kitob" if book else "Kitob"
-    else:
-        book_title = book.title_ru or book.title_uz or "Книга" if book else "Книга"
-    
-    await query.edit_message_text(
-        f"📑 {book_title} - Mavzular / Themes:",
-        reply_markup=reply_markup
+    book = get_book_by_id(theme.book_id)
+    if not book:
+        await query.message.edit_text(get_text('book_not_found', lang))
+        return
+
+    theme_name = theme.name_uz if lang == 'uz' else theme.name_ru
+    theme_name = theme_name or theme.name_uz or theme.name_ru
+
+    book_title = book.title_uz if lang == 'uz' else book.title_ru
+    book_title = book_title or book.title_uz or book.title_ru
+
+    text = get_text('theme_details', lang, theme_name=theme_name, book_title=book_title, start_page=(theme.start_page or 0) + 1, end_page=(theme.end_page or 0) + 1)
+
+    keyboard = [
+        [InlineKeyboardButton(get_text('download_theme_pdf', lang), callback_data=f"theme_pdf_{lang}_{theme_id}")],
+        [InlineKeyboardButton(get_text('back', lang), callback_data=f"book_{book.id}")]
+    ]
+
+    await query.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
     )
 
 
-async def handle_back_languages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle back to language selection."""
+async def browse_books(update: Update, context) -> None:
+    """Show grade selection menu."""
     query = update.callback_query
-    await query.answer()
+    if query:
+        await query.answer()
+        user_id = update.effective_user.id
+    else:
+        user_id = update.effective_user.id
+
+    lang = get_user_lang(user_id)
     
     keyboard = [
-        [InlineKeyboardButton("🇺🇿 O'zbekcha / Uzbek", callback_data="lang_uz")],
-        [InlineKeyboardButton("🇷🇺 Русский / Russian", callback_data="lang_ru")],
+        [
+            InlineKeyboardButton("1-4", callback_data="grade_1-4"),
+            InlineKeyboardButton("5-9", callback_data="grade_5-9"),
+            InlineKeyboardButton("10-11", callback_data="grade_10-11")
+        ],
+        [InlineKeyboardButton(get_text('back', lang), callback_data="back_to_start")]
     ]
     
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    markup = InlineKeyboardMarkup(keyboard)
+    text = get_text('select_grade', lang)
     
-    await query.edit_message_text(
-        "📚 Kitoblarni ko'rish / Browse Books\n\n"
-        "Tilni tanlang / Select language:",
-        reply_markup=reply_markup
-    )
+    if query:
+        await query.message.edit_text(text, reply_markup=markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=markup, parse_mode='Markdown')

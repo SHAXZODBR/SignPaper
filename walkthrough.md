@@ -2,6 +2,35 @@
 
 All objectives have been met. The SignPaper bot is now fully rebuilt, enhanced with analytics, and successfully deployed to the cloud (Railway + Supabase).
 
+## Phase 7: Full Russian Support 🌐
+
+The bot now supports both **Uzbek** and **Russian** languages with persistent user preferences.
+
+### Key Features:
+- **Language Selection:** Users can choose their language via `/start` or the new `/lang` command.
+- **Persistent Preferences:** The selected language is stored in a `user_settings` table in Supabase.
+- **Centralized Translations:** All UI strings are managed through a unified `translations.py` module.
+- **Bilingual AI Content:** AI summaries and quizzes are now generated in the user's preferred language, with fallback logic for content availability.
+- **Localized UI:** All menus, buttons, and notifications adapt to the selected language in real-time.
+
+### Implementation Details:
+1. **Database:** Added `user_settings` table to track preferences.
+2. **Translation system:** Implemented `translations.py` with 50+ localized keys.
+3. **Handlers:** Refactored `main.py`, `books.py`, `search.py`, and `ai_handler.py`.
+4. **AI Integration:** Modified prompt engineering in AI services to respect the `language` parameter.
+
+```mermaid
+graph TD
+    User[/User/] --> Bot[Telegram Bot]
+    Bot --> LangChk{Check Preference}
+    LangChk --> DB[(Supabase user_settings)]
+    DB --> Pref[Selected Language]
+    Pref --> Trans[translations.py]
+    Trans --> UI[Localized UI]
+    Pref --> AI[AI Services]
+    AI --> Output[Localized Summary/Quiz]
+```
+
 ## 🌐 Remote Operation Architecture
 
 The bot is now 100% cloud-native. It no longer requires your local computer to be on.

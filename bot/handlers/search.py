@@ -7,11 +7,11 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import sys
 sys.path.append('../..')
+from bot.translations import get_text
 from database.models import (
     get_session, Theme, Book,
-    get_theme, get_book, use_supabase
+    use_supabase
 )
-from services.search_engine import SearchEngine
 
 # Import Supabase search
 try:
@@ -19,11 +19,17 @@ try:
         search_themes as sb_search_themes,
         detect_language,
         track_search,
-        track_user_action
+        track_user_action,
+        get_user_lang,
+        get_theme_by_id,
+        get_book_by_id
     )
     SUPABASE_SEARCH = True
 except ImportError:
     SUPABASE_SEARCH = False
+    def get_user_lang(uid): return 'uz'
+    # Fallback to local handles if not in Supabase environment
+    from database.models import get_theme as get_theme_by_id, get_book as get_book_by_id
 
 # Initialize local search engine as fallback
 search_engine = SearchEngine()
@@ -31,15 +37,13 @@ search_engine = SearchEngine()
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /search command."""
+    lang = get_user_lang(update.effective_user.id)
     if context.args:
         query = ' '.join(context.args)
         await perform_search(update, context, query)
     else:
         await update.message.reply_text(
-            "🔍 **Search for Topics**\n\n"
-            "Usage: `/search <query>`\n"
-            "Example: `/search Pifagor teoremasi`\n\n"
-            "Or just type any text to search!",
+            get_text('search_usage', lang),
             parse_mode='Markdown'
         )
 
@@ -93,8 +97,8 @@ async def perform_search(
     else:
         message = update.message
     
-    # Get user for analytics
     user = update.effective_user
+    lang = get_user_lang(user.id)
     
     # Track search analytics (only on first page)
     if SUPABASE_SEARCH and offset == 0:
@@ -106,47 +110,26 @@ async def perform_search(
         )
     
     if not display_results:
-        text = (
-            f"❌ No results found for: {query}\n\n"
-            "Try:\n"
-            "• Using different keywords\n"
-            "• Searching in another language\n"
-            "• Checking spelling"
-        )
+        text = get_text('no_results', lang, query=query)
         if from_callback:
-             await message.edit_text(text)
+             await message.edit_text(text, parse_mode='Markdown')
         else:
-             await message.reply_text(text)
+             await message.reply_text(text, parse_mode='Markdown')
         return
     
     # Create response message
     start_num = offset + 1
-    response_lines = [f"🔍 Natijalar / Results: {query} ({start_num}-{offset+len(display_results)})\n"]
-    
-    query_lang = display_results[0].get('query_lang', 'uz')
+    response_lines = [get_text('search_results_header', lang, query=query, start=start_num, end=offset+len(display_results))]
     
     for i, result in enumerate(display_results, start_num):
-        theme_id = result.get('theme_id')
-        
-        # Get book title
-        if query_lang == 'ru':
-            book_title = result.get('book_title_ru') or result.get('book_title_uz') or 'Unknown'
-        else:
-            book_title = result.get('book_title_uz') or result.get('book_title_ru') or 'Unknown'
+        # Get theme name based on user language or detection
+        theme_name = result.get(f'name_{lang}') or result.get('name_uz') or result.get('name_ru') or 'Theme'
+        book_title = result.get(f'book_title_{lang}') or result.get('book_title_uz') or result.get('book_title_ru') or 'Book'
         
         grade = result.get('grade', '')
         start_page = result.get('start_page')
         end_page = result.get('end_page')
         
-        # Get theme name
-        theme_name_uz = result.get('name_uz')
-        theme_name_ru = result.get('name_ru')
-        
-        if query_lang == 'ru':
-            theme_name = theme_name_ru or theme_name_uz or 'Theme'
-        else:
-            theme_name = theme_name_uz or theme_name_ru or 'Mavzu'
-            
         # Display: Theme name and book info (no snippet)
         display_text = f"📄 {theme_name}"
         
@@ -165,7 +148,7 @@ async def perform_search(
     keyboard = []
     for i, result in enumerate(display_results, start_num):
         theme_id = result.get('theme_id')
-        theme_name = result.get('name_uz') or result.get('name_ru') or ''
+        theme_name = result.get(f'name_{lang}') or result.get('name_uz') or result.get('name_ru') or 'Theme'
         
         # Show theme name in button (cleaner)
         btn_text = f"{i}. {theme_name[:30]}"
@@ -179,9 +162,9 @@ async def perform_search(
     # Navigation Buttons
     nav_buttons = []
     if offset > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Oldingi", callback_data=f"search_nav_{offset-limit}"))
+        nav_buttons.append(InlineKeyboardButton(get_text('prev', lang), callback_data=f"search_nav_{offset-limit}"))
     if has_next:
-        nav_buttons.append(InlineKeyboardButton("Keyingi ➡️", callback_data=f"search_nav_{offset+limit}"))
+        nav_buttons.append(InlineKeyboardButton(get_text('next', lang), callback_data=f"search_nav_{offset+limit}"))
     
     if nav_buttons:
         keyboard.append(nav_buttons)
@@ -191,121 +174,108 @@ async def perform_search(
     if from_callback:
         await message.edit_text(
             '\n'.join(response_lines),
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
         )
     else:
         await message.reply_text(
             '\n'.join(response_lines),
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
         )
 
 
 
-async def handle_theme_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle theme selection from search results."""
-    query = update.callback_query
-    await query.answer()
-    
-    callback_data = query.data
-    if not callback_data.startswith('theme_'):
-        return
-    
-    theme_id = int(callback_data.replace('theme_', ''))
+    user_id = update.effective_user.id
+    lang = get_user_lang(user_id)
     
     # Use unified data access (Supabase or SQLite)
-    theme = get_theme(theme_id)
+    theme = get_theme_by_id(theme_id)
     
     if not theme:
-        await query.edit_message_text("❌ Mavzu topilmadi / Theme not found.")
+        await query.edit_message_text(get_text('theme_not_found', lang))
         return
     
-    book = get_book(theme.book_id)
+    book = get_book_by_id(theme.book_id)
     book_id = book.id if book else 0
     grade = book.grade if book else '?'
-    subject = book.subject if book else '?'
     
-    # Check what content is available
-    has_uz = bool(theme.name_uz)
-    has_ru = bool(theme.name_ru)
+    # Track analytics
+    track_user_action(
+        telegram_user_id=user_id,
+        action_type="view_theme",
+        telegram_username=update.effective_user.username,
+        first_name=update.effective_user.first_name,
+        action_data={"theme_id": theme_id, "book_id": theme.book_id, "language": lang}
+    )
+
+    theme_name = theme.name_uz if lang == 'uz' else theme.name_ru
+    theme_name = theme_name or theme.name_uz or theme.name_ru
     
-    # Check if PDF URLs are available (Supabase) or local paths
-    has_uz_pdf = bool(book and book.pdf_path_uz) if book else False
-    has_ru_pdf = bool(book and book.pdf_path_ru) if book else False
+    book_title = book.title_uz if lang == 'uz' else book.title_ru
+    book_title = book_title or book.title_uz or book.title_ru
     
-    # Determine display language based on what's available
-    if has_uz:
-        show_lang = 'uz'
-        name = theme.name_uz
-        book_title = book.title_uz or book.title_ru or subject if book else subject
-    elif has_ru:
-        show_lang = 'ru'
-        name = theme.name_ru
-        book_title = book.title_ru or book.title_uz or subject if book else subject
-    else:
-        show_lang = 'uz'
-        name = f"Mavzu #{theme_id}"
-        book_title = subject
-    
-    # Create theme details message - bilingual
+    # Create theme details message
     start_page = theme.start_page or 0
     end_page = theme.end_page or 0
     
-    response = (
-        f"📖 **Mavzu / Тема**\n\n"
-        f"🇺🇿 {theme.name_uz or '-'}\n"
-        f"🇷🇺 {theme.name_ru or '-'}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📚 {book_title}\n"
-        f"📊 Sinf / Класс: {grade}\n"
-        f"📁 Fan / Предмет: {subject}\n"
-        f"📄 Sahifalar / Страницы: {start_page} - {end_page}\n"
-    )
+    response = get_text('theme_details_full', lang, 
+                        theme_name=theme_name, 
+                        book_title=book_title, 
+                        grade=grade,
+                        subject=book.subject if book else "?",
+                        start_page=start_page+1, 
+                        end_page=end_page+1)
     
     # Create action buttons
     keyboard = []
     
     # AI buttons
     keyboard.append([
-        InlineKeyboardButton("🤖 AI Xulosa", callback_data=f"summary_{theme_id}"),
-        InlineKeyboardButton("📝 AI Test", callback_data=f"quiz_{theme_id}"),
+        InlineKeyboardButton(get_text('ai_summary', lang), callback_data=f"ai_sum_{theme_id}"),
+        InlineKeyboardButton(get_text('ai_quiz', lang), callback_data=f"ai_quiz_{theme_id}"),
     ])
     
-    # Download buttons - show both languages if available
+    # Check if PDF URLs are available
+    has_uz_pdf = bool(book and book.pdf_path_uz)
+    has_ru_pdf = bool(book and book.pdf_path_ru)
+    
+    # Download buttons
     download_row = []
     if has_uz_pdf:
-        download_row.append(InlineKeyboardButton("📥 🇺🇿 PDF", callback_data=f"download_uz_{book_id}"))
+        download_row.append(InlineKeyboardButton(get_text('download_full_pdf', 'uz'), callback_data=f"dl_book_{book_id}_uz"))
     if has_ru_pdf:
-        download_row.append(InlineKeyboardButton("📥 🇷🇺 PDF", callback_data=f"download_ru_{book_id}"))
+        download_row.append(InlineKeyboardButton(get_text('download_full_pdf', 'ru'), callback_data=f"dl_book_{book_id}_ru"))
     if download_row:
         keyboard.append(download_row)
     
-    # Theme PDF (just this chapter) - show if we have valid page range
-    # Note: start_page can be 0, so check for None explicitly
+    # Theme PDF (just this chapter)
     if start_page is not None and end_page is not None and end_page > start_page:
         theme_rows = []
         if has_uz_pdf:
-            theme_rows.append(InlineKeyboardButton("📄 Mavzu UZ", callback_data=f"theme_pdf_uz_{theme_id}"))
+            theme_rows.append(InlineKeyboardButton(get_text('download_theme_pdf', 'uz'), callback_data=f"theme_pdf_uz_{theme_id}"))
         if has_ru_pdf:
-            theme_rows.append(InlineKeyboardButton("📄 Тема RU", callback_data=f"theme_pdf_ru_{theme_id}"))
+            theme_rows.append(InlineKeyboardButton(get_text('download_theme_pdf', 'ru'), callback_data=f"theme_pdf_ru_{theme_id}"))
         
         if theme_rows:
             keyboard.append(theme_rows)
     
     # Educational resources
     keyboard.append([
-        InlineKeyboardButton("🔗 Ta'lim resurslari / Ресурсы", callback_data=f"resources_{theme_id}")
+        InlineKeyboardButton(get_text('educational_resources', lang), callback_data=f"resources_{theme_id}")
     ])
     
-    # Back button - go back to search (not random book)
+    # Back button
     keyboard.append([
-        InlineKeyboardButton("🔙 Ortga / Back", callback_data="back_to_search")
+        InlineKeyboardButton(get_text('back', lang), callback_data="back_to_search")
     ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
         response,
-        reply_markup=reply_markup
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
     )
 
 
@@ -353,13 +323,12 @@ async def handle_back_to_search(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     
+    lang = get_user_lang(update.effective_user.id)
+    
     # Get last search query
     search_query = context.user_data.get('last_search')
     if not search_query:
-        await query.edit_message_text(
-            "🔍 Yangi qidiruv uchun matn yozing.\n"
-            "Type any text to search."
-        )
+        await query.edit_message_text(get_text('new_search_prompt', lang))
         return
         
     await perform_search(update, context, search_query, offset=0, from_callback=True)

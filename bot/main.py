@@ -53,12 +53,20 @@ from bot.handlers.support import (
     WAITING_FOR_MESSAGE,
 )
 
-# Import analytics tracking
+# Import analytics and settings
 try:
-    from database.supabase_client import track_user_action, track_download
+    from database.supabase_client import (
+        track_user_action, track_download,
+        get_user_lang, set_user_lang
+    )
     ANALYTICS_AVAILABLE = True
 except ImportError:
     ANALYTICS_AVAILABLE = False
+    # Fallback if Supabase client not fully updated
+    def get_user_lang(uid): return 'uz'
+    def set_user_lang(uid, lang): return False
+
+from bot.translations import get_text
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -90,39 +98,22 @@ async def start_command(update: Update, context) -> None:
         except:
             pass
     
-    welcome_message = (
-        f"👋 Assalomu alaykum, **{user.first_name}**!\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📚 **SignPaper** - O'zbekiston maktab darsliklari\n"
-        "📚 **SignPaper** - Школьные учебники Узбекистана\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "✨ **Imkoniyatlar / Features:**\n"
-        "• 🔍 Mavzularni qidirish\n"
-        "• 📥 Darsliklarni yuklab olish\n"
-        "• 🤖 AI bilan test va xulosa\n"
-        "• 📚 72+ ta darslik\n\n"
-        "⬇️ **Tez qidirish / Quick Search:**"
-    )
+    # Get user language preference
+    lang = get_user_lang(user.id)
+    
+    welcome_message = get_text('welcome', lang, name=user.first_name)
     
     keyboard = [
         [
-            InlineKeyboardButton("🔢 Sonlar", callback_data="search_sonlar"),
-            InlineKeyboardButton("📐 Matematika", callback_data="search_matematika")
+            InlineKeyboardButton(f"🇺🇿 O'zbekcha", callback_data="set_lang_uz"),
+            InlineKeyboardButton(f"🇷🇺 Русский", callback_data="set_lang_ru")
         ],
         [
-            InlineKeyboardButton("⚗️ Kimyo", callback_data="search_kimyo"),
-            InlineKeyboardButton("🔬 Fizika", callback_data="search_fizika")
+            InlineKeyboardButton(get_text('browse_books', lang), callback_data="browse_books")
         ],
         [
-            InlineKeyboardButton("🧬 Biologiya", callback_data="search_biologiya"),
-            InlineKeyboardButton("📜 Tarix", callback_data="search_tarix")
-        ],
-        [
-            InlineKeyboardButton("📚 Kitoblar / Books", callback_data="browse_books")
-        ],
-        [
-            InlineKeyboardButton("📞 Yordam / Support", callback_data="show_support"),
-            InlineKeyboardButton("⭐ Baholash", callback_data="show_feedback")
+            InlineKeyboardButton(get_text('support', lang), callback_data="show_support"),
+            InlineKeyboardButton(get_text('feedback', lang), callback_data="show_feedback")
         ]
     ]
     
@@ -135,53 +126,93 @@ async def start_command(update: Update, context) -> None:
     )
 
 
+async def lang_command(update: Update, context) -> None:
+    """Handle /lang command for language selection."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("🇺🇿 O'zbekcha", callback_data="set_lang_uz"),
+            InlineKeyboardButton("🇷🇺 Русский", callback_data="set_lang_ru")
+        ],
+        [InlineKeyboardButton(get_text('back', get_user_lang(update.effective_user.id)), callback_data="back_to_start")]
+    ]
+    
+    await update.message.reply_text(
+        get_text('select_language', get_user_lang(update.effective_user.id)),
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+
+async def handle_rating(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle rating button click."""
+    query = update.callback_query
+    lang = get_user_lang(update.effective_user.id)
+    await query.answer(get_text('thank_you_feedback', lang))
+    
+    rating = query.data.replace("rate_", "")
+    # Save rating logic here if needed
+    
+    await query.message.edit_text(get_text('feedback_received', lang, rating=rating))
+
+
+async def set_language_handler(update: Update, context) -> None:
+    """Handle language selection callback."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = query.data.replace("set_lang_", "")
+    user = update.effective_user
+    
+    # Save setting
+    set_user_lang(user.id, lang)
+    
+    # Confirm and show welcome again with new language
+    await query.message.edit_text(
+        get_text('lang_changed', lang),
+        parse_mode='Markdown'
+    )
+    
+    # Trigger start command logic after a short delay or just show menu
+    await start_command(update, context)
+
+
 async def help_command(update: Update, context) -> None:
     """Handle /help command."""
-    help_text = (
-        "📖 **SignPaper Bot - Yordam**\n\n"
-        "**Buyruqlar / Commands:**\n"
-        "`/start` - Boshlash\n"
-        "`/search` - Mavzularni qidirish\n"
-        "`/books` - Kitoblarni ko'rish\n"
-        "`/support` - Qo'llab-quvvatlash\n"
-        "`/feedback` - Bot haqida fikr\n"
-        "`/stats` - Statistika\n\n"
-        "**Tips:**\n"
-        "• Istalgan matnni yozing - avtomatik qidiradi\n"
-        "• O'zbek va rus tilida ishlaydi\n"
-        "• PDF yuklab olish bepul!\n\n"
-        "📧 Aloqa: @SignPaperSupport"
-    )
-    await update.message.reply_text(help_text, parse_mode='Markdown')
+    lang = get_user_lang(update.effective_user.id)
+    await update.message.reply_text(get_text('help', lang), parse_mode='Markdown')
 
 
-async def stats_command(update: Update, context) -> None:
-    """Handle /stats command."""
-    from database.models import get_database_stats, use_supabase
-    
-    stats = get_database_stats()
-    db_type = "☁️ Supabase" if use_supabase() else "💾 SQLite"
-    
-    stats_text = (
-        "📊 **SignPaper Statistika**\n\n"
-        f"📚 Kitoblar: {stats.get('books', 0)}\n"
-        f"📑 Mavzular: {stats.get('themes', 0)}\n"
-        f"🔗 Resurslar: {stats.get('resources', 0)}\n\n"
-        f"🗄️ Database: {db_type}"
-    )
-    
-    await update.message.reply_text(stats_text, parse_mode='Markdown')
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /stats command with localization."""
+    lang = get_user_lang(update.effective_user.id)
+    # Check if user is admin
+    if str(update.effective_user.id) != str(ADMIN_CHAT_ID):
+        await update.message.reply_text(get_text('admin_only', lang))
+        return
+        
+    try:
+        stats = get_stats()
+        
+        response = get_text('stats_report', lang, 
+                            users=stats.get('total_users', 0),
+                            searches=stats.get('total_searches', 0),
+                            downloads=stats.get('total_downloads', 0))
+        
+        await update.message.reply_text(response, parse_mode='Markdown')
+    except Exception as e:
+        await update.message.reply_text(f"Error fetching stats: {e}")
 
 
 async def set_bot_commands(application: Application) -> None:
     """Set bot commands for the menu."""
     commands = [
-        BotCommand("start", "🏠 Boshlash / Start"),
-        BotCommand("search", "🔍 Qidirish / Search"),
-        BotCommand("books", "📚 Kitoblar / Books"),
-        BotCommand("support", "📞 Yordam / Support"),
-        BotCommand("feedback", "⭐ Baholash / Rate"),
-        BotCommand("help", "❓ Yordam / Help"),
+        BotCommand("start", "🏠 Start / Boshlash"),
+        BotCommand("search", "🔍 Search / Qidirish"),
+        BotCommand("books", "📚 Books / Kitoblar"),
+        BotCommand("lang", "🌐 Language / Til"),
+        BotCommand("support", "📞 Support / Yordam"),
+        BotCommand("help", "❓ Help / Yordam"),
     ]
     await application.bot.set_my_commands(commands)
 
@@ -208,6 +239,7 @@ def main() -> None:
     # ═══════════════════════════════════════════════════════════════════
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("lang", lang_command))
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler("books", books_command))
     application.add_handler(CommandHandler("resources", resources_command))
@@ -255,43 +287,40 @@ def main() -> None:
     # Rating handler
     application.add_handler(CallbackQueryHandler(handle_rating, pattern=r"^rate_\d$"))
     
+    # Language setter handler
+    application.add_handler(CallbackQueryHandler(set_language_handler, pattern=r"^set_lang_"))
+    
+    # Back to start
+    async def back_to_start(update: Update, context):
+        await start_command(update, context)
+    application.add_handler(CallbackQueryHandler(back_to_start, pattern=r"^back_to_start$"))
+    
     # Support/Feedback from start menu
     async def show_support_menu(update: Update, context):
         query = update.callback_query
+        lang = get_user_lang(update.effective_user.id)
         await query.answer()
-        await query.message.reply_text(
-            "📞 **Qo'llab-quvvatlash**\n\n"
-            "Savolingiz bo'lsa /support buyrug'ini yuboring.\n\n"
-            "📧 Email: support@sign.uz\n"
-            "💬 Telegram: @shakhzodbr",
-            parse_mode='Markdown'
-        )
+        await query.message.reply_text(get_text('support_message', lang), parse_mode='Markdown')
+    application.add_handler(CallbackQueryHandler(show_support_menu, pattern=r"^show_support$"))
     
     async def show_feedback_menu(update: Update, context):
         query = update.callback_query
+        lang = get_user_lang(update.effective_user.id)
         await query.answer()
-        await feedback_command.__wrapped__(update, context) if hasattr(feedback_command, '__wrapped__') else None
-        # Send feedback prompt
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        
         keyboard = [
             [
-                InlineKeyboardButton("⭐ 5", callback_data="rate_5"),
-                InlineKeyboardButton("⭐ 4", callback_data="rate_4"),
-                InlineKeyboardButton("⭐ 3", callback_data="rate_3"),
-            ],
-            [
-                InlineKeyboardButton("⭐ 2", callback_data="rate_2"),
                 InlineKeyboardButton("⭐ 1", callback_data="rate_1"),
+                InlineKeyboardButton("⭐ 2", callback_data="rate_2"),
+                InlineKeyboardButton("⭐ 3", callback_data="rate_3"),
+                InlineKeyboardButton("⭐ 4", callback_data="rate_4"),
+                InlineKeyboardButton("⭐ 5", callback_data="rate_5")
             ]
         ]
         await query.message.reply_text(
-            "⭐ **Botni baholang!**\n\n"
-            "Sizning fikringiz biz uchun muhim.",
-            parse_mode='Markdown',
+            get_text('rate_bot', lang),
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-    
-    application.add_handler(CallbackQueryHandler(show_support_menu, pattern=r"^show_support$"))
     application.add_handler(CallbackQueryHandler(show_feedback_menu, pattern=r"^show_feedback$"))
     
     # Quick search from start menu

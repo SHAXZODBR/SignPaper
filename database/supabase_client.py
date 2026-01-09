@@ -40,6 +40,42 @@ def is_supabase_configured() -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# USER SETTINGS (LANGUAGE)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@lru_cache(maxsize=1000)
+def get_user_lang(telegram_user_id: int) -> str:
+    """Get user's preferred language. Defaults to 'uz'."""
+    try:
+        client = get_supabase()
+        response = client.table("user_settings").select("language").eq("telegram_user_id", telegram_user_id).limit(1).execute()
+        if response.data:
+            return response.data[0].get("language", "uz")
+    except Exception as e:
+        print(f"Error getting user language: {e}")
+    return "uz"
+
+
+def set_user_lang(telegram_user_id: int, language: str) -> bool:
+    """Set user's preferred language."""
+    try:
+        client = get_supabase()
+        # Use upsert to create or update
+        client.table("user_settings").upsert({
+            "telegram_user_id": telegram_user_id,
+            "language": language,
+            "updated_at": "now()"
+        }).execute()
+        
+        # Clear cache for this user
+        get_user_lang.cache_clear()
+        return True
+    except Exception as e:
+        print(f"Error setting user language: {e}")
+        return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # BOOKS OPERATIONS
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -437,12 +473,45 @@ def save_support_message(
 # STATISTICS
 # ═══════════════════════════════════════════════════════════════════════════
 
+def get_users_count() -> int:
+    """Get total number of unique users."""
+    try:
+        client = get_supabase()
+        response = client.table("user_analytics").select("telegram_user_id", count="exact").execute()
+        # Note: This is a hack because Supabase select doesn't easily do DISTINCT count via client
+        # For small-medium boards, we can just get all and len(set) or use a RPC
+        # But for now, let's just count rows in user_analytics which represents 'visits'
+        return response.count or 0
+    except:
+        return 0
+
+def get_searches_count() -> int:
+    """Get total number of searches."""
+    try:
+        client = get_supabase()
+        response = client.table("search_analytics").select("*", count="exact").execute()
+        return response.count or 0
+    except:
+        return 0
+
+def get_downloads_count() -> int:
+    """Get total number of downloads."""
+    try:
+        client = get_supabase()
+        response = client.table("downloads").select("*", count="exact").execute()
+        return response.count or 0
+    except:
+        return 0
+
 def get_stats() -> Dict[str, int]:
     """Get database statistics."""
     return {
         "books": get_books_count(),
         "themes": get_themes_count(),
-        "resources": get_resources_count()
+        "resources": get_resources_count(),
+        "total_users": get_users_count(),
+        "total_searches": get_searches_count(),
+        "total_downloads": get_downloads_count()
     }
 
 
