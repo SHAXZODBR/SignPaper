@@ -33,20 +33,21 @@ async def handle_resources(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.message.reply_text("❌ Theme not found.")
         return
     
-    book = get_book(theme.book_id)
+    book = get_book(theme.get('book_id') if isinstance(theme, dict) else theme.book_id)
     
     # Get stored resources from database
     db_resources = fetch_theme_resources(theme_id)
     
     # Also get fresh resources from ResourceFinder
     fresh_resources = ResourceFinder.find_resources_for_theme(
-        theme_name=theme.name_uz or theme.name_ru or "",
-        subject=book.subject if book else "general",
-        grade=book.grade if book else 5
+        theme_name=theme.get('name_uz') if isinstance(theme, dict) else (theme.name_uz or theme.name_ru or ""),
+        subject=book.get('subject') if (book and isinstance(book, dict)) else (book.subject if book else "general"),
+        grade=book.get('grade') if (book and isinstance(book, dict)) else (book.grade if book else 5)
     )
     
     # Build response message
-    theme_name = theme.name_uz or theme.name_ru or "Theme"
+    theme_name = (theme.get('name_uz') if isinstance(theme, dict) else theme.name_uz) or \
+                 (theme.get('name_ru') if isinstance(theme, dict) else theme.name_ru) or "Theme"
     lines = [f"🔗 **Educational Resources for:**\n_{theme_name}_\n"]
     
     # Group by language
@@ -54,15 +55,16 @@ async def handle_resources(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     # Add database resources
     for res in db_resources:
-        if res.language in lang_resources:
-            lang_resources[res.language].append({
-                'title': res.title,
-                'url': res.url,
-                'type': res.resource_type
+        res_lang = res.get('language') if isinstance(res, dict) else res.language
+        if res_lang in lang_resources:
+            lang_resources[res_lang].append({
+                'title': res.get('title') if isinstance(res, dict) else res.title,
+                'url': res.get('url') if isinstance(res, dict) else res.url,
+                'type': res.get('resource_type') if isinstance(res, dict) else res.resource_type
             })
     
     # Add fresh resources (avoiding duplicates)
-    existing_urls = {res.url for res in db_resources}
+    existing_urls = {res.get('url') if isinstance(res, dict) else res.url for res in db_resources}
     for res in fresh_resources:
         if res.url not in existing_urls and res.language in lang_resources:
             lang_resources[res.language].append({

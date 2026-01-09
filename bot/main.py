@@ -297,11 +297,11 @@ def main() -> None:
     # ═══════════════════════════════════════════════════════════════════
     application.add_handler(CallbackQueryHandler(handle_theme_selection, pattern=r"^theme_\d+$"))
     application.add_handler(CallbackQueryHandler(handle_language_selection, pattern=r"^lang_(uz|ru)$"))
-    application.add_handler(CallbackQueryHandler(handle_grade_selection, pattern=r"^grade_(uz|ru)_\d+$"))
-    application.add_handler(CallbackQueryHandler(handle_book_selection, pattern=r"^book_(uz|ru)_\d+$"))
-    application.add_handler(CallbackQueryHandler(handle_book_pdf_download, pattern=r"^download_(uz|ru)_\d+$"))
-    application.add_handler(CallbackQueryHandler(handle_theme_pdf_download, pattern=r"^theme_pdf_(?:(?:uz|ru)_)?\d+$"))
-    application.add_handler(CallbackQueryHandler(handle_themes_list, pattern=r"^themes_(uz|ru)_\d+$"))
+    application.add_handler(CallbackQueryHandler(handle_grade_selection, pattern=r"^grade_"))
+    application.add_handler(CallbackQueryHandler(handle_book_selection, pattern=r"^book_\d+$"))
+    application.add_handler(CallbackQueryHandler(handle_book_pdf_download, pattern=r"^dl_book_"))
+    application.add_handler(CallbackQueryHandler(handle_theme_pdf_download, pattern=r"^theme_pdf_"))
+    application.add_handler(CallbackQueryHandler(handle_themes_list, pattern=r"^themes_\d+$"))
     
     # Search Pagination
     application.add_handler(CallbackQueryHandler(handle_search_pagination, pattern=r"^search_nav_"))
@@ -310,8 +310,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_back_languages, pattern=r"^back_languages$"))
     
     # AI handlers
-    application.add_handler(CallbackQueryHandler(handle_summary_request, pattern=r"^summary_\d+$"))
-    application.add_handler(CallbackQueryHandler(handle_quiz_request, pattern=r"^quiz_\d+$"))
+    application.add_handler(CallbackQueryHandler(handle_summary_request, pattern=r"^(ai_sum|summary)_"))
+    application.add_handler(CallbackQueryHandler(handle_quiz_request, pattern=r"^(ai_quiz|quiz)_"))
     
     # Rating handler
     application.add_handler(CallbackQueryHandler(handle_rating, pattern=r"^rate_\d$"))

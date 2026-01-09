@@ -7,28 +7,30 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import sys
 sys.path.append('../..')
-from database.models import (
-    get_session, Theme, Book,
-    get_theme, get_book, get_theme_and_book,
-    use_supabase
-)
-from services.ai_summary import generate_summary, generate_quiz
 
-from bot.translations import get_text
-# Import analytics tracking and settings
 try:
-    from database.supabase_client import track_user_action, get_user_lang
+    from database.supabase_client import (
+        get_book_by_id as get_book,
+        get_theme_by_id as get_theme,
+        get_theme_with_book as get_theme_and_book,
+        track_user_action, get_user_lang
+    )
     ANALYTICS_AVAILABLE = True
 except ImportError:
+    from database.models import get_book, get_theme, get_theme_and_book
     ANALYTICS_AVAILABLE = False
+    def track_user_action(*args, **kwargs): pass
     def get_user_lang(uid): return 'uz'
+
+from services.ai_summary import generate_summary, generate_quiz
+from bot.translations import get_text
 
 
 async def handle_summary_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle AI Summary button click."""
     query = update.callback_query
     user_id = update.effective_user.id
-    lang = get_user_lang(user_id)
+    lang = get_user_lang(user_id) or 'uz'
     
     await query.answer(get_text('generating_summary', lang))
     
@@ -48,7 +50,7 @@ async def handle_summary_request(update: Update, context: ContextTypes.DEFAULT_T
         await query.message.reply_text(get_text('theme_not_found', lang))
         return
     
-    book = theme._book if hasattr(theme, '_book') else None
+    book = theme.get('books') if isinstance(theme, dict) else getattr(theme, '_book', None)
     
     # Track analytics
     if ANALYTICS_AVAILABLE:
@@ -63,15 +65,15 @@ async def handle_summary_request(update: Update, context: ContextTypes.DEFAULT_T
     
     # Determine content and AI output language
     # Strategy: Use content of current preferred language if available, else fallback
-    content = theme.content_uz if lang == 'uz' else theme.content_ru
+    content = theme.get('content_uz') if lang == 'uz' else theme.get('content_ru')
     ai_lang = lang
     
     if not content:
-        content = theme.content_ru if lang == 'uz' else theme.content_uz
+        content = theme.get('content_ru') if lang == 'uz' else theme.get('content_uz')
         ai_lang = 'ru' if lang == 'uz' else 'uz'
         
-    name = theme.name_uz if lang == 'uz' else theme.name_ru
-    name = name or theme.name_uz or theme.name_ru
+    name = theme.get('name_uz') if lang == 'uz' else theme.get('name_ru')
+    name = name or theme.get('name_uz') or theme.get('name_ru')
     
     if not content or len(content) < 100:
         await query.message.reply_text(get_text('not_enough_content', lang))
@@ -82,8 +84,13 @@ async def handle_summary_request(update: Update, context: ContextTypes.DEFAULT_T
         summary = generate_summary(content, name, ai_lang)
         
         if summary:
-            book_title = book.title_uz if lang == 'uz' else book.title_ru
-            book_title = book_title or (book.title_uz or book.title_ru if book else 'Book')
+            book_title = book.get('title_uz') if (book and isinstance(book, dict)) else (book.title_uz if book else None)
+            if not book_title and book and isinstance(book, dict):
+                book_title = book.get('title_ru')
+            elif not book_title and book:
+                book_title = book.title_ru
+            
+            book_title = book_title or 'Book'
             
             response = get_text('ai_summary_header', lang, theme_name=name, book_title=book_title, summary=summary)
             
@@ -109,7 +116,7 @@ async def handle_quiz_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Handle AI Quiz button click."""
     query = update.callback_query
     user_id = update.effective_user.id
-    lang = get_user_lang(user_id)
+    lang = get_user_lang(user_id) or 'uz'
     
     await query.answer(get_text('generating_quiz', lang))
     
@@ -129,7 +136,7 @@ async def handle_quiz_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.message.reply_text(get_text('theme_not_found', lang))
         return
     
-    book = theme._book if hasattr(theme, '_book') else None
+    book = theme.get('books') if isinstance(theme, dict) else getattr(theme, '_book', None)
     
     # Track analytics
     if ANALYTICS_AVAILABLE:
@@ -143,15 +150,15 @@ async def handle_quiz_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     
     # Determine content and AI output language
-    content = theme.content_uz if lang == 'uz' else theme.content_ru
+    content = theme.get('content_uz') if lang == 'uz' else theme.get('content_ru')
     ai_lang = lang
     
     if not content:
-        content = theme.content_ru if lang == 'uz' else theme.content_uz
+        content = theme.get('content_ru') if lang == 'uz' else theme.get('content_uz')
         ai_lang = 'ru' if lang == 'uz' else 'uz'
         
-    name = theme.name_uz if lang == 'uz' else theme.name_ru
-    name = name or theme.name_uz or theme.name_ru
+    name = theme.get('name_uz') if lang == 'uz' else theme.get('name_ru')
+    name = name or theme.get('name_uz') or theme.get('name_ru')
     
     if not content or len(content) < 100:
         await query.message.reply_text(get_text('not_enough_content', lang))
@@ -186,8 +193,13 @@ async def handle_quiz_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 escaped = escaped.replace('&lt;/tg-spoiler&gt;', '</tg-spoiler>')
                 return escaped
             
-            book_title = book.title_uz if lang == 'uz' else book.title_ru
-            book_title = book_title or (book.title_uz or book.title_ru if book else 'Book')
+            book_title = book.get('title_uz') if (book and isinstance(book, dict)) else (book.title_uz if book else None)
+            if not book_title and book and isinstance(book, dict):
+                book_title = book.get('title_ru')
+            elif not book_title and book:
+                book_title = book.title_ru
+            
+            book_title = book_title or 'Book'
             
             safe_name = html.escape(name)
             safe_book_title = html.escape(book_title)
