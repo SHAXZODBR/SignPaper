@@ -184,9 +184,12 @@ async def perform_search(
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
-
-
-
+async def handle_theme_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle theme selection from search results."""
+    query = update.callback_query
+    await query.answer()
+    
+    theme_id = int(query.data.replace('theme_', ''))
     user_id = update.effective_user.id
     lang = get_user_lang(user_id)
     
