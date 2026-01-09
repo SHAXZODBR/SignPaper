@@ -1,6 +1,18 @@
-# 📚 Uzbek School Books Bot - Setup Guide
+# 📚 SignPaper - Uzbek School Books Bot
 
-## Quick Setup (5 minutes)
+Professional Telegram bot for Uzbek school textbooks with AI-powered features.
+
+## ✨ Features
+
+- 🔍 **Search** - Find topics in both Uzbek and Russian
+- 📚 **Browse** - Browse books by grade (5-11)
+- 📥 **Download** - Get PDF textbooks and chapters
+- 🤖 **AI Summary** - AI-generated chapter summaries
+- 📝 **AI Quiz** - Generate quiz questions from content
+- 🔗 **Resources** - Educational videos and courses
+- 📊 **Analytics** - Track user engagement
+
+## 🚀 Quick Setup
 
 ### Step 1: Install Dependencies
 ```bash
@@ -8,18 +20,7 @@ pip install -r requirements.txt
 ```
 
 ### Step 2: Configure Environment
-Edit `.env` file with your keys:
-```env
-# Required
-TELEGRAM_BOT_TOKEN="your-bot-token"
-
-# Optional - AI Summary
-GEMINI_API_KEY="your-gemini-key"
-
-# Optional - Cloud Database
-SUPABASE_URL="your-supabase-url"
-SUPABASE_KEY="your-supabase-key"
-```
+Copy `.env.example` to `.env` and fill in your keys:
 
 ### Step 3: Add Your Books
 Place PDF files in folders:

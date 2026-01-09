@@ -9,6 +9,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Import database functions
+try:
+    from database.supabase_client import save_support_message, save_feedback
+    DB_AVAILABLE = True
+except ImportError:
+    DB_AVAILABLE = False
+
 # Admin chat ID for receiving support messages (set in .env)
 # Get your ID by sending /myid to the bot
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "")
@@ -101,6 +108,20 @@ async def receive_support_message(update: Update, context: ContextTypes.DEFAULT_
     else:
         print("⚠️ ADMIN_CHAT_ID not set in .env - support message not forwarded")
     
+    # Save to database
+    if DB_AVAILABLE:
+        try:
+            save_support_message(
+                telegram_user_id=user.id,
+                message=message,
+                telegram_username=user.username,
+                first_name=user.first_name,
+                is_from_user=True
+            )
+            print(f"✅ Support message saved to DB")
+        except Exception as e:
+            print(f"❌ Error saving to DB: {e}")
+    
     # Confirm to user
     await update.message.reply_text(
         "✅ **Xabaringiz qabul qilindi!**\n\n"
@@ -191,11 +212,23 @@ async def handle_rating(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     query = update.callback_query
     await query.answer()
     
-    rating = query.data.replace("rate_", "")
+    rating = int(query.data.replace("rate_", ""))
     user = update.effective_user
     
     # Log rating
     print(f"⭐ Rating: {rating} from {user.first_name} ({user.id})")
+    
+    # Save to database
+    if DB_AVAILABLE:
+        try:
+            save_feedback(
+                telegram_user_id=user.id,
+                rating=rating,
+                telegram_username=user.username
+            )
+            print(f"✅ Feedback saved to DB")
+        except Exception as e:
+            print(f"❌ Error saving feedback to DB: {e}")
     
     # Send to admin
     if ADMIN_CHAT_ID:

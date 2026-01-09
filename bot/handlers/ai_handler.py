@@ -1,13 +1,25 @@
 """
 AI Handler
 Handles AI-powered features like summaries and quizzes.
+Uses Supabase when configured, SQLite otherwise.
 """
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import sys
 sys.path.append('../..')
-from database.models import get_session, Theme, Book
+from database.models import (
+    get_session, Theme, Book,
+    get_theme, get_book, get_theme_and_book,
+    use_supabase
+)
 from services.ai_summary import generate_summary, generate_quiz
+
+# Import analytics tracking
+try:
+    from database.supabase_client import track_user_action
+    ANALYTICS_AVAILABLE = True
+except ImportError:
+    ANALYTICS_AVAILABLE = False
 
 
 async def handle_summary_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -21,15 +33,25 @@ async def handle_summary_request(update: Update, context: ContextTypes.DEFAULT_T
     
     theme_id = int(callback_data.replace('summary_', ''))
     
-    # Get theme from database
-    session = get_session()
-    theme = session.query(Theme).filter(Theme.id == theme_id).first()
+    # Get theme with book (uses Supabase or SQLite automatically)
+    theme = get_theme_and_book(theme_id)
     
     if not theme:
         await query.message.reply_text("❌ Theme not found.")
         return
     
-    book = session.query(Book).filter(Book.id == theme.book_id).first()
+    book = theme._book if hasattr(theme, '_book') else None
+    
+    # Track analytics
+    if ANALYTICS_AVAILABLE:
+        user = update.effective_user
+        track_user_action(
+            telegram_user_id=user.id,
+            action_type="summary",
+            telegram_username=user.username,
+            first_name=user.first_name,
+            action_data={"theme_id": theme_id}
+        )
     
     # Determine content and language
     content = theme.content_uz or theme.content_ru or ""
@@ -48,11 +70,12 @@ async def handle_summary_request(update: Update, context: ContextTypes.DEFAULT_T
         summary = generate_summary(content, name, language)
         
         if summary:
+            book_title = book.title_uz or book.title_ru if book else 'Unknown'
             response = (
                 f"📝 AI Summary\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"📖 {name}\n"
-                f"📚 {book.title_uz or book.title_ru if book else 'Unknown'}\n"
+                f"📚 {book_title}\n"
                 f"━━━━━━━━━━━━━━━━━━\n\n"
                 f"{summary}\n\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
@@ -82,7 +105,7 @@ async def handle_summary_request(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_quiz_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle AI Quiz button click."""
     query = update.callback_query
-    await query.answer("Generating 10 quiz questions... Please wait ⏳")
+    await query.answer("Generating quiz... / Test yaratilmoqda... ⏳")
     
     callback_data = query.data
     if not callback_data.startswith('quiz_'):
@@ -90,15 +113,25 @@ async def handle_quiz_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     theme_id = int(callback_data.replace('quiz_', ''))
     
-    # Get theme from database
-    session = get_session()
-    theme = session.query(Theme).filter(Theme.id == theme_id).first()
+    # Get theme with book (uses Supabase or SQLite automatically)
+    theme = get_theme_and_book(theme_id)
     
     if not theme:
-        await query.message.reply_text("❌ Theme not found.")
+        await query.message.reply_text("❌ Mavzu topilmadi / Theme not found.")
         return
     
-    book = session.query(Book).filter(Book.id == theme.book_id).first()
+    book = theme._book if hasattr(theme, '_book') else None
+    
+    # Track analytics
+    if ANALYTICS_AVAILABLE:
+        user = update.effective_user
+        track_user_action(
+            telegram_user_id=user.id,
+            action_type="quiz",
+            telegram_username=user.username,
+            first_name=user.first_name,
+            action_data={"theme_id": theme_id}
+        )
     
     # Determine content and language
     content = theme.content_uz or theme.content_ru or ""
@@ -107,8 +140,9 @@ async def handle_quiz_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if not content or len(content) < 100:
         await query.message.reply_text(
-            "❌ Not enough content to generate quiz.\n"
-            "This chapter doesn't have extracted text."
+            "❌ Test yaratish uchun yetarli ma'lumot yo'q.\n"
+            "❌ Not enough content to generate quiz.\n\n"
+            "Bu bo'lim uchun matn chiqarilmagan."
         )
         return
     

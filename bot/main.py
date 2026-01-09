@@ -21,6 +21,8 @@ from bot.handlers.search import (
     search_command,
     handle_theme_selection,
     text_search_handler,
+    handle_search_pagination,
+    handle_back_to_search,
 )
 from bot.handlers.books import (
     books_command,
@@ -51,6 +53,13 @@ from bot.handlers.support import (
     WAITING_FOR_MESSAGE,
 )
 
+# Import analytics tracking
+try:
+    from database.supabase_client import track_user_action, track_download
+    ANALYTICS_AVAILABLE = True
+except ImportError:
+    ANALYTICS_AVAILABLE = False
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -68,6 +77,19 @@ async def start_command(update: Update, context) -> None:
     
     user = update.effective_user
     
+    # Track user visit
+    if ANALYTICS_AVAILABLE:
+        try:
+            track_user_action(
+                telegram_user_id=user.id,
+                action_type="start",
+                telegram_username=user.username,
+                first_name=user.first_name,
+                action_data={"source": "start_command"}
+            )
+        except:
+            pass
+    
     welcome_message = (
         f"👋 Assalomu alaykum, **{user.first_name}**!\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -84,16 +106,16 @@ async def start_command(update: Update, context) -> None:
     
     keyboard = [
         [
-            InlineKeyboardButton("🔢 Natural sonlar", callback_data="search_Natural sonlar"),
-            InlineKeyboardButton("📐 Pifagor", callback_data="search_Pifagor")
+            InlineKeyboardButton("🔢 Sonlar", callback_data="search_sonlar"),
+            InlineKeyboardButton("📐 Matematika", callback_data="search_matematika")
         ],
         [
-            InlineKeyboardButton("🧬 Hujayra", callback_data="search_Hujayra"),
-            InlineKeyboardButton("⚗️ Atom", callback_data="search_Atom")
+            InlineKeyboardButton("⚗️ Kimyo", callback_data="search_kimyo"),
+            InlineKeyboardButton("🔬 Fizika", callback_data="search_fizika")
         ],
         [
-            InlineKeyboardButton("🧪 Химия", callback_data="search_Химия"),
-            InlineKeyboardButton("📊 Физика", callback_data="search_Физика")
+            InlineKeyboardButton("🧬 Biologiya", callback_data="search_biologiya"),
+            InlineKeyboardButton("📜 Tarix", callback_data="search_tarix")
         ],
         [
             InlineKeyboardButton("📚 Kitoblar / Books", callback_data="browse_books")
@@ -135,18 +157,17 @@ async def help_command(update: Update, context) -> None:
 
 async def stats_command(update: Update, context) -> None:
     """Handle /stats command."""
-    from database.models import get_session, Book, Theme, Resource
+    from database.models import get_database_stats, use_supabase
     
-    session = get_session()
-    books_count = session.query(Book).count()
-    themes_count = session.query(Theme).count()
-    resources_count = session.query(Resource).count()
+    stats = get_database_stats()
+    db_type = "☁️ Supabase" if use_supabase() else "💾 SQLite"
     
     stats_text = (
         "📊 **SignPaper Statistika**\n\n"
-        f"📚 Kitoblar: {books_count}\n"
-        f"📑 Mavzular: {themes_count}\n"
-        f"🔗 Resurslar: {resources_count}\n"
+        f"📚 Kitoblar: {stats.get('books', 0)}\n"
+        f"📑 Mavzular: {stats.get('themes', 0)}\n"
+        f"🔗 Resurslar: {stats.get('resources', 0)}\n\n"
+        f"🗄️ Database: {db_type}"
     )
     
     await update.message.reply_text(stats_text, parse_mode='Markdown')
@@ -218,8 +239,12 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_grade_selection, pattern=r"^grade_(uz|ru)_\d+$"))
     application.add_handler(CallbackQueryHandler(handle_book_selection, pattern=r"^book_(uz|ru)_\d+$"))
     application.add_handler(CallbackQueryHandler(handle_book_pdf_download, pattern=r"^download_(uz|ru)_\d+$"))
-    application.add_handler(CallbackQueryHandler(handle_theme_pdf_download, pattern=r"^theme_pdf_\d+$"))
+    application.add_handler(CallbackQueryHandler(handle_theme_pdf_download, pattern=r"^theme_pdf_(?:(?:uz|ru)_)?\d+$"))
     application.add_handler(CallbackQueryHandler(handle_themes_list, pattern=r"^themes_(uz|ru)_\d+$"))
+    
+    # Search Pagination
+    application.add_handler(CallbackQueryHandler(handle_search_pagination, pattern=r"^search_nav_"))
+    application.add_handler(CallbackQueryHandler(handle_back_to_search, pattern=r"^back_to_search$"))
     application.add_handler(CallbackQueryHandler(handle_resources, pattern=r"^resources_\d+$"))
     application.add_handler(CallbackQueryHandler(handle_back_languages, pattern=r"^back_languages$"))
     
@@ -275,7 +300,7 @@ def main() -> None:
         await query.answer()
         search_term = query.data.replace("search_", "")
         from bot.handlers.search import perform_search
-        await perform_search(update, search_term, from_callback=True)
+        await perform_search(update, context, search_term, from_callback=True)
     
     async def handle_browse_books(update: Update, context):
         query = update.callback_query
@@ -292,14 +317,14 @@ def main() -> None:
     application.post_init = set_bot_commands
     
     # Start bot
-    print("═" * 50)
-    print("📚 SignPaper Bot - Starting...")
-    print("═" * 50)
-    print("🤖 Bot is running!")
-    print("📞 Press Ctrl+C to stop")
-    print("═" * 50)
+    print("=" * 50)
+    print("SignPaper Bot - Starting...")
+    print("=" * 50)
+    print("Bot is running!")
+    print("Press Ctrl+C to stop")
+    print("=" * 50)
     
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,36 @@
+"""
+Database Models
+Supports both Supabase (cloud) and SQLite (local fallback).
+"""
 from sqlalchemy import Column, Integer, String, Text, ForeignKey, create_engine
 from sqlalchemy.orm import relationship, declarative_base, sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 import sys
 sys.path.append('..')
 from config import DATABASE_PATH
+
+# Try to import Supabase client
+try:
+    from database.supabase_client import (
+        is_supabase_configured,
+        get_book_by_id as sb_get_book,
+        get_books_by_grade as sb_get_books_by_grade,
+        get_theme_by_id as sb_get_theme,
+        get_themes_by_book as sb_get_themes_by_book,
+        get_theme_with_book as sb_get_theme_with_book,
+        count_themes_by_book as sb_count_themes,
+        search_themes as sb_search_themes,
+        get_resources_by_theme as sb_get_resources,
+        get_stats as sb_get_stats,
+        track_user_action,
+        track_search,
+        track_download,
+        save_feedback,
+        save_support_message,
+    )
+    SUPABASE_AVAILABLE = is_supabase_configured()
+except ImportError:
+    SUPABASE_AVAILABLE = False
 
 Base = declarative_base()
 
@@ -100,5 +127,134 @@ async def get_async_session():
     return async_session()
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# UNIFIED DATA ACCESS FUNCTIONS
+# These functions use Supabase when configured, SQLite otherwise
+# ═══════════════════════════════════════════════════════════════════════════
+
+def use_supabase() -> bool:
+    """Check if we should use Supabase."""
+    return SUPABASE_AVAILABLE
+
+
+def get_book(book_id: int):
+    """Get book by ID - uses Supabase if configured, SQLite otherwise."""
+    if SUPABASE_AVAILABLE:
+        data = sb_get_book(book_id)
+        if data:
+            # Convert dict to object-like access
+            return DictWrapper(data)
+        return None
+    else:
+        session = get_session()
+        return session.query(Book).filter(Book.id == book_id).first()
+
+
+def get_theme(theme_id: int):
+    """Get theme by ID - uses Supabase if configured, SQLite otherwise."""
+    if SUPABASE_AVAILABLE:
+        data = sb_get_theme(theme_id)
+        if data:
+            return DictWrapper(data)
+        return None
+    else:
+        session = get_session()
+        return session.query(Theme).filter(Theme.id == theme_id).first()
+
+
+def get_theme_and_book(theme_id: int):
+    """Get theme with its book - uses Supabase if configured."""
+    if SUPABASE_AVAILABLE:
+        data = sb_get_theme_with_book(theme_id)
+        if data:
+            theme = DictWrapper(data)
+            if data.get("books"):
+                theme._book = DictWrapper(data["books"])
+            return theme
+        return None
+    else:
+        session = get_session()
+        theme = session.query(Theme).filter(Theme.id == theme_id).first()
+        if theme:
+            theme._book = session.query(Book).filter(Book.id == theme.book_id).first()
+        return theme
+
+
+def fetch_books_by_grade(grade: int, language: str = None):
+    """Get books for a grade - uses Supabase if configured."""
+    if SUPABASE_AVAILABLE:
+        data = sb_get_books_by_grade(grade, language=language)
+        return [DictWrapper(b) for b in data]
+    else:
+        session = get_session()
+        # Local SQLite fallback doesn't support language filtering easily without schema change
+        # but for now we just return all
+        return session.query(Book).filter(Book.grade == grade).all()
+
+
+def fetch_themes_by_book(book_id: int):
+    """Get themes for a book - uses Supabase if configured."""
+    if SUPABASE_AVAILABLE:
+        data = sb_get_themes_by_book(book_id)
+        return [DictWrapper(t) for t in data]
+    else:
+        session = get_session()
+        return session.query(Theme).filter(Theme.book_id == book_id).all()
+
+
+def count_book_themes(book_id: int) -> int:
+    """Count themes for a book."""
+    if SUPABASE_AVAILABLE:
+        return sb_count_themes(book_id)
+    else:
+        session = get_session()
+        return session.query(Theme).filter(Theme.book_id == book_id).count()
+
+
+def fetch_theme_resources(theme_id: int):
+    """Get resources for a theme."""
+    if SUPABASE_AVAILABLE:
+        data = sb_get_resources(theme_id)
+        return [DictWrapper(r) for r in data]
+    else:
+        session = get_session()
+        return session.query(Resource).filter(Resource.theme_id == theme_id).all()
+
+
+def get_database_stats():
+    """Get database statistics."""
+    if SUPABASE_AVAILABLE:
+        return sb_get_stats()
+    else:
+        session = get_session()
+        return {
+            "books": session.query(Book).count(),
+            "themes": session.query(Theme).count(),
+            "resources": session.query(Resource).count()
+        }
+
+
+class DictWrapper:
+    """Wrapper to access dict keys as attributes."""
+    def __init__(self, data):
+        self._data = data
+        self._book = None
+    
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            return object.__getattribute__(self, name)
+        return self._data.get(name)
+    
+    def __getitem__(self, key):
+        return self._data.get(key)
+    
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+
+
 if __name__ == "__main__":
     init_db()
+    if SUPABASE_AVAILABLE:
+        print("✅ Using Supabase as primary database")
+    else:
+        print("ℹ️ Using SQLite (Supabase not configured)")

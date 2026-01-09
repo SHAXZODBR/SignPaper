@@ -1,13 +1,18 @@
 """
 Resources Handler
-Handles educational resource display for themes.
+Handles educational resources display.
+Uses Supabase when configured, SQLite otherwise.
 """
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import sys
 sys.path.append('../..')
-from database.models import get_session, Theme, Book, Resource
-from services.resource_finder import ResourceFinder
+from database.models import (
+    get_session, Theme, Book, Resource,
+    get_theme, get_book, fetch_theme_resources,
+    use_supabase
+)
+from services.resource_finder import ResourceFinder, EducationalResource
 
 
 async def handle_resources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -21,23 +26,23 @@ async def handle_resources(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     theme_id = int(callback_data.replace('resources_', ''))
     
-    session = get_session()
-    theme = session.query(Theme).filter(Theme.id == theme_id).first()
+    # Get theme (uses Supabase or SQLite automatically)
+    theme = get_theme(theme_id)
     
     if not theme:
         await query.message.reply_text("❌ Theme not found.")
         return
     
-    book = session.query(Book).filter(Book.id == theme.book_id).first()
+    book = get_book(theme.book_id)
     
     # Get stored resources from database
-    db_resources = session.query(Resource).filter(Resource.theme_id == theme_id).all()
+    db_resources = fetch_theme_resources(theme_id)
     
     # Also get fresh resources from ResourceFinder
     fresh_resources = ResourceFinder.find_resources_for_theme(
         theme_name=theme.name_uz or theme.name_ru or "",
-        subject=book.subject,
-        grade=book.grade
+        subject=book.subject if book else "general",
+        grade=book.grade if book else 5
     )
     
     # Build response message
