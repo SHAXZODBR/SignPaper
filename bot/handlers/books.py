@@ -433,7 +433,6 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
         import tempfile
         
         print(f"[PDF DEBUG] Downloading book PDF from URL for extraction: {pdf_path}")
-        await query.message.edit_reply_markup(reply_markup=None) # Remove buttons during download
         loading_msg = await query.message.reply_text("⏳ Kitob yuklanmoqda (mavzu ajratish uchun)... / Downloading book (for extraction)...")
         
         try:
