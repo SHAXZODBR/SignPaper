@@ -426,12 +426,42 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
     
     print(f"[PDF DEBUG] PDF path: {pdf_path}")
     
-    if not pdf_path:
-        print(f"[PDF DEBUG] No PDF path")
-        await query.message.reply_text(f"❌ {lang_name} PDF topilmadi (path is None).")
-        return
+    # Support for Supabase Storage URLs
+    temp_pdf_path = None
+    if pdf_path and pdf_path.startswith('http'):
+        import aiohttp
+        import tempfile
         
-    if not Path(pdf_path).exists():
+        print(f"[PDF DEBUG] Downloading book PDF from URL for extraction: {pdf_path}")
+        await query.message.edit_reply_markup(reply_markup=None) # Remove buttons during download
+        loading_msg = await query.message.reply_text("⏳ Kitob yuklanmoqda (mavzu ajratish uchun)... / Downloading book (for extraction)...")
+        
+        try:
+            temp_dir = Path("data/temp_books")
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Use filename as unique identifier for caching
+            filename = pdf_path.split('/')[-1]
+            temp_pdf_path = temp_dir / filename
+            
+            if not temp_pdf_path.exists():
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(pdf_path, timeout=aiohttp.ClientTimeout(total=300)) as resp:
+                        if resp.status == 200:
+                            content = await resp.read()
+                            with open(temp_pdf_path, 'wb') as f:
+                                f.write(content)
+                        else:
+                            raise Exception(f"Failed to download book: {resp.status}")
+            
+            pdf_path = str(temp_pdf_path)
+            await loading_msg.delete()
+        except Exception as e:
+            if 'loading_msg' in locals(): await loading_msg.delete()
+            await query.message.reply_text(f"❌ Kitobni yuklab bo'lmadi: {str(e)}")
+            return
+            
+    if not pdf_path or not Path(pdf_path).exists():
         print(f"[PDF DEBUG] PDF file not found at: {pdf_path}")
         await query.message.reply_text(f"❌ {lang_name} PDF topilmadi (file missing).")
         return
