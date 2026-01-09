@@ -559,3 +559,10 @@ async def browse_books(update: Update, context) -> None:
         await query.message.edit_text(text, reply_markup=markup, parse_mode='Markdown')
     else:
         await update.message.reply_text(text, reply_markup=markup, parse_mode='Markdown')
+
+
+async def handle_back_languages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle back button to language selection."""
+    query = update.callback_query
+    await query.answer()
+    await books_command(update, context, from_callback=True)
