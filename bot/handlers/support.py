@@ -57,12 +57,18 @@ async def myid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
 
-async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_callback: bool = False) -> int:
+async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /support command or button click."""
+    query = update.callback_query
     lang = get_user_lang(update.effective_user.id)
+    
+    cancel_text = "❌ Bekor qilish" if lang == 'uz' else "❌ Отмена"
+    
     keyboard = [
-        [InlineKeyboardButton(get_text('back', lang), callback_data="back_to_start"),
-         InlineKeyboardButton("❌ " + (get_text('back', lang) if lang == 'uz' else "Отмена"), callback_data="cancel_support")]
+        [
+            InlineKeyboardButton(get_text('back', lang), callback_data="back_to_start"),
+            InlineKeyboardButton(cancel_text, callback_data="cancel_support")
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -75,9 +81,9 @@ async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE, fr
         "✍️ Xabaringizni yozing / Write your message:"
     )
     
-    if from_callback and update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    if query:
+        await query.answer()
+        await query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
     else:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
         
@@ -182,18 +188,26 @@ async def reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def cancel_support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancel support conversation."""
+    """Cancel support conversation and return to menu."""
     query = update.callback_query
+    lang = get_user_lang(update.effective_user.id)
+    
+    text = "❌ Bekor qilindi / Cancelled"
+    
     if query:
         await query.answer()
-        await query.edit_message_text("❌ Bekor qilindi / Cancelled")
+        # Instead of just text, let's go back to start menu
+        from bot.main import start_command
+        await start_command(update, context, from_callback=True)
     else:
-        await update.message.reply_text("❌ Bekor qilindi / Cancelled")
+        await update.message.reply_text(text)
+        
     return ConversationHandler.END
 
 
-async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_callback: bool = False) -> None:
+async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /feedback command or button click."""
+    query = update.callback_query
     lang = get_user_lang(update.effective_user.id)
     keyboard = [
         [
@@ -215,9 +229,9 @@ async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE, f
         "🇷🇺 Оцените нашего бота!"
     )
     
-    if from_callback and update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    if query:
+        await query.answer()
+        await query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
     else:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 

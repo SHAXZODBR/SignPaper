@@ -270,7 +270,10 @@ def main() -> None:
     
     # Support conversation handler
     support_conv = ConversationHandler(
-        entry_points=[CommandHandler("support", support_command)],
+        entry_points=[
+            CommandHandler("support", support_command),
+            CallbackQueryHandler(support_command, pattern="^show_support$")
+        ],
         states={
             WAITING_FOR_MESSAGE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_support_message)
@@ -279,7 +282,9 @@ def main() -> None:
         fallbacks=[
             CallbackQueryHandler(cancel_support, pattern="^cancel_support$"),
             CommandHandler("cancel", cancel_support),
+            CallbackQueryHandler(back_to_start, pattern="^back_to_start$"),
         ],
+        allow_reentry=True
     )
     application.add_handler(support_conv)
     
@@ -315,14 +320,7 @@ def main() -> None:
         await start_command(update, context)
     application.add_handler(CallbackQueryHandler(back_to_start, pattern=r"^back_to_start$"))
     
-    # Support/Feedback from start menu
-    async def show_support_menu(update: Update, context):
-        await support_command(update, context, from_callback=True)
-    application.add_handler(CallbackQueryHandler(show_support_menu, pattern=r"^show_support$"))
-    
-    async def show_feedback_menu(update: Update, context):
-        await feedback_command(update, context, from_callback=True)
-    application.add_handler(CallbackQueryHandler(show_feedback_menu, pattern=r"^show_feedback$"))
+    application.add_handler(CallbackQueryHandler(feedback_command, pattern=r"^show_feedback$"))
     
     # Quick search from start menu
     async def handle_quick_search(update: Update, context):
