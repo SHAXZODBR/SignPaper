@@ -268,6 +268,10 @@ def main() -> None:
     application.add_handler(CommandHandler("myid", myid_command))
     application.add_handler(CommandHandler("reply", reply_command))
     
+    # Back to start helper
+    async def back_to_start(update: Update, context):
+        await start_command(update, context)
+    
     # Support conversation handler
     support_conv = ConversationHandler(
         entry_points=[
@@ -315,9 +319,6 @@ def main() -> None:
     # Language setter handler
     application.add_handler(CallbackQueryHandler(set_language_handler, pattern=r"^set_lang_"))
     
-    # Back to start
-    async def back_to_start(update: Update, context):
-        await start_command(update, context)
     application.add_handler(CallbackQueryHandler(back_to_start, pattern=r"^back_to_start$"))
     
     application.add_handler(CallbackQueryHandler(feedback_command, pattern=r"^show_feedback$"))
