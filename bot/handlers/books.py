@@ -126,10 +126,10 @@ async def handle_grade_selection(update: Update, context: ContextTypes.DEFAULT_T
 
     keyboard = []
     for book in books:
-        title = book.title_uz if lang == 'uz' else book.title_ru
-        title = title or book.title_uz or book.title_ru
+        title = book.get('title_uz') if lang == 'uz' else book.get('title_ru')
+        title = title or book.get('title_uz') or book.get('title_ru')
         title = title[:35] + '...' if len(title) > 35 else title
-        keyboard.append([InlineKeyboardButton(f"📖 {title}", callback_data=f"book_{book.id}")])
+        keyboard.append([InlineKeyboardButton(f"📖 {title}", callback_data=f"book_{book.get('id')}")])
     
     keyboard.append([InlineKeyboardButton(get_text('back', lang), callback_data="browse_books")])
     
@@ -188,13 +188,13 @@ async def handle_book_selection(update: Update, context: ContextTypes.DEFAULT_TY
     # PDF download buttons - check if available for current language
     has_pdf = (lang == 'uz' and book.get('pdf_path_uz')) or (lang == 'ru' and book.get('pdf_path_ru'))
     if has_pdf:
-        keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', lang), callback_data=f"dl_book_{book['id']}_{lang}")])
+        keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', lang, lang_upper=lang.upper()), callback_data=f"dl_book_{book['id']}_{lang}")])
     
     # Add alternative language PDF if available
     alt_lang = 'ru' if lang == 'uz' else 'uz'
     has_alt_pdf = (alt_lang == 'uz' and book.get('pdf_path_uz')) or (alt_lang == 'ru' and book.get('pdf_path_ru'))
     if has_alt_pdf:
-        keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', alt_lang), callback_data=f"dl_book_{book['id']}_{alt_lang}")])
+        keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', alt_lang, lang_upper=alt_lang.upper()), callback_data=f"dl_book_{book['id']}_{alt_lang}")])
 
     keyboard.append([InlineKeyboardButton(get_text('back', lang), callback_data=f"grade_{book.get('grade')}-{book.get('grade')}")]) # Go back to specific grade range
     
@@ -437,18 +437,18 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
         return
     
     # Generate filename
-    theme_name = (theme.name_uz if req_lang == 'uz' else theme.name_ru) or f"theme_{theme_id}"
+    theme_name = (theme.get('name_uz') if req_lang == 'uz' else theme.get('name_ru')) or f"theme_{theme_id}"
     safe_name = "".join(c for c in theme_name if c.isalnum() or c in (' ', '-', '_'))[:50]
     output_filename = f"{safe_name}_{req_lang}.pdf"
     
-    print(f"[PDF DEBUG] Extracting pages {theme.start_page}-{theme.end_page} to {output_filename}")
+    print(f"[PDF DEBUG] Extracting pages {theme.get('start_page')}-{theme.get('end_page')} to {output_filename}")
     
     try:
         processor = PDFProcessor(pdf_path)
         if processor.open():
             output_path = processor.extract_theme_pdf(
-                theme.start_page or 0,
-                theme.end_page or 0,
+                theme.get('start_page') or 0,
+                theme.get('end_page') or 0,
                 output_filename
             )
             processor.close()
@@ -464,12 +464,12 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
                     await query.message.reply_text(get_text("pdf_too_large", user_lang, file_size=f"{file_size_mb:.1f}"))
                     return
                 
-                start_page = (theme.start_page or 0) + 1
-                end_page = (theme.end_page or 0) + 1
+                start_page = (theme.get('start_page') or 0) + 1
+                end_page = (theme.get('end_page') or 0) + 1
                 await query.message.reply_document(
                     document=open(output_path, 'rb'),
                     filename=output_filename,
-                    caption=get_text("theme_pdf_caption", user_lang, emoji=emoji, theme_name=safe_name, start_page=start_page, end_page=end_page, book_title=(book.title_uz if user_lang == 'uz' else book.title_ru)),
+                    caption=get_text("theme_pdf_caption", user_lang, emoji=emoji, theme_name=safe_name, start_page=start_page, end_page=end_page, book_title=(book.get('title_uz') if user_lang == 'uz' else book.get('title_ru'))),
                     read_timeout=120,
                     write_timeout=120
                 )

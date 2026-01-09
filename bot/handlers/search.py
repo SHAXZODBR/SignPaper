@@ -247,9 +247,9 @@ async def handle_theme_selection(update: Update, context: ContextTypes.DEFAULT_T
     # Download buttons
     download_row = []
     if has_uz_pdf:
-        download_row.append(InlineKeyboardButton(get_text('download_full_pdf', 'uz'), callback_data=f"dl_book_{book_id}_uz"))
+        download_row.append(InlineKeyboardButton(get_text('download_full_pdf', 'uz', lang_upper='UZ'), callback_data=f"dl_book_{book_id}_uz"))
     if has_ru_pdf:
-        download_row.append(InlineKeyboardButton(get_text('download_full_pdf', 'ru'), callback_data=f"dl_book_{book_id}_ru"))
+        download_row.append(InlineKeyboardButton(get_text('download_full_pdf', 'ru', lang_upper='RU'), callback_data=f"dl_book_{book_id}_ru"))
     if download_row:
         keyboard.append(download_row)
     
