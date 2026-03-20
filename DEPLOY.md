@@ -116,6 +116,25 @@ ALTER TABLE feedback DISABLE ROW LEVEL SECURITY;
 ALTER TABLE support_messages DISABLE ROW LEVEL SECURITY;
 ```
 
+### Option 5: Vercel (Serverless - Free Tier)
+
+1. **Prerequisites**: [Vercel CLI](https://vercel.com/download) installed.
+2. **Deploy via CLI**:
+   ```bash
+   vercel
+   ```
+3. **Environment Variables**:
+   Go to Vercel Project Settings → Environment Variables and add:
+   - `TELEGRAM_BOT_TOKEN`
+   - `SUPABASE_URL`
+   - `SUPABASE_KEY`
+   - `GROQ_API_KEY`
+4. **Set Webhook**:
+   Telegram bots on Vercel must use Webhooks. Run this (replace `<TOKEN>` and `<VERCEL_URL>`):
+   ```bash
+   curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<VERCEL_URL>/api/webhook"
+   ```
+
 ---
 
 ## Verify Deployment

@@ -241,15 +241,14 @@ async def set_bot_commands(application: Application) -> None:
 # MAIN APPLICATION
 # ═══════════════════════════════════════════════════════════════════════════
 
-def main() -> None:
-    """Start the bot."""
+async def init_application() -> Application:
+    """Initialize and configure the bot application."""
     # Initialize database
     init_db()
     
     # Check for bot token
     if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "your_bot_token_here":
-        print("❌ Error: TELEGRAM_BOT_TOKEN not set!")
-        return
+        raise ValueError("TELEGRAM_BOT_TOKEN not set!")
 
     # Create application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -345,9 +344,25 @@ def main() -> None:
     # Set bot commands
     application.post_init = set_bot_commands
     
+    return application
+
+
+def main() -> None:
+    """Start the bot in polling mode (Local Development)."""
+    import asyncio
+    
+    try:
+        # Use existing event loop if available or create new one
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+    application = loop.run_until_complete(init_application())
+    
     # Start bot
     print("=" * 50)
-    print("SignPaper Bot - Starting...")
+    print("SignPaper Bot - Starting (Polling Mode)...")
     print("=" * 50)
     print("Bot is running!")
     print("Press Ctrl+C to stop")
