@@ -80,6 +80,8 @@ async def perform_search(
                 'grade': r.get('grade'),
                 'book_title_uz': r.get('book_title_uz'),
                 'book_title_ru': r.get('book_title_ru'),
+                'start_page': r.get('start_page'),
+                'end_page': r.get('end_page'),
                 'score': r.get('relevance_score', 0),
                 'query_lang': detect_language(query),
                 'snippet': r.get('snippet', '')

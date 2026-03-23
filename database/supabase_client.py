@@ -246,66 +246,79 @@ def _fallback_search(
     grade: Optional[int] = None,
     subject: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """Search themes by NAME only (not content)."""
     try:
         client = get_supabase()
         query = query.strip()
+        words = [w.lower() for w in query.split() if len(w) > 1]
         
-        # Search ONLY in theme names (not content)
-        filter_str = f"name_uz.ilike.%{query}%,name_ru.ilike.%{query}%"
+        if not words:
+            # Fallback for very short queries
+            words = [query.lower()]
+            
+        # Broad search: find anything matching the FIRST word in Supabase
+        first_word = words[0]
+        filter_str = f"name_uz.ilike.%{first_word}%,name_ru.ilike.%{first_word}%"
         
         base_query = client.table("themes").select(
-            "id, book_id, name_uz, name_ru, start_page, end_page, books(subject, grade, title_uz, title_ru)"
+            "id, book_id, name_uz, name_ru, start_page, end_page, is_active, books(subject, grade, title_uz, title_ru, is_active)"
         ).eq("is_active", True)
         
-        # Add name filter
+        # Add broad name filter
         base_query = base_query.or_(filter_str)
         
-        # Pagination
-        response = base_query.order('id').range(offset, offset + 49).execute()
+        # We need to fetch enough to filter locally
+        response = base_query.limit(200).execute()
         
         results = []
-        query_lower = query.lower()
-        
         for theme in response.data or []:
-            book = theme.get("books", {})
-            if not book: continue
+            book = theme.get("books")
+            if not book or not book.get("is_active"):
+                continue
             
-            # Apply filters
+            # Additional Grade/Subject filters
             if grade and book.get("grade") != grade:
                 continue
             if subject and subject.lower() not in (book.get("subject") or "").lower():
                 continue
             
-            name_uz = theme.get("name_uz") or ""
-            name_ru = theme.get("name_ru") or ""
+            name_uz = (theme.get("name_uz") or "").lower()
+            name_ru = (theme.get("name_ru") or "").lower()
             
-            # Only include if query is in name
-            if query_lower in name_uz.lower() or query_lower in name_ru.lower():
+            # NEW matching logic: All words must be present (in any order)
+            match_uz = all(w in name_uz for w in words)
+            match_ru = all(w in name_ru for w in words)
+            
+            if match_uz or match_ru:
+                # Calculate relevance score
+                # Exact phrase match gets higher score
+                score = 1000
+                if query.lower() in name_uz or query.lower() in name_ru:
+                    score += 500
+                
                 results.append({
                     "theme_id": theme["id"],
                     "book_id": theme["book_id"],
-                    "name_uz": name_uz,  # Actual theme name
-                    "name_ru": name_ru,  # Actual theme name
+                    "name_uz": theme.get("name_uz"),
+                    "name_ru": theme.get("name_ru"),
                     "subject": book.get("subject"),
                     "grade": book.get("grade"),
                     "book_title_uz": book.get("title_uz"),
                     "book_title_ru": book.get("title_ru"),
                     "start_page": theme.get("start_page"),
                     "end_page": theme.get("end_page"),
-                    "relevance_score": 1000,
+                    "relevance_score": score,
                     "snippet": ""
                 })
         
-        # Deduplicate
+        # Deduplicate and sort by score
         seen_ids = set()
         unique_results = []
-        for r in results:
+        for r in sorted(results, key=lambda x: x["relevance_score"], reverse=True):
             if r["theme_id"] not in seen_ids:
                 seen_ids.add(r["theme_id"])
                 unique_results.append(r)
         
-        return unique_results[:limit]
+        return unique_results[offset : offset + limit]
         
 
         
