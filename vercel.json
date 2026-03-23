@@ -2,13 +2,8 @@
   "version": 2,
   "rewrites": [
     {
-      "source": "/api/(.*)",
+      "source": "/(.*)",
       "destination": "/api/index.py"
     }
-  ],
-  "functions": {
-    "api/index.py": {
-      "runtime": "@vercel/python"
-    }
-  }
+  ]
 }

@@ -3,7 +3,13 @@ PDF Processor Service
 Handles extraction and generation of PDFs for school books.
 Includes OCR support for scanned PDFs using Tesseract.
 """
-import fitz  # PyMuPDF
+# Try to import PyMuPDF (optional dependency)
+try:
+    import fitz
+    FITZ_AVAILABLE = True
+except ImportError:
+    FITZ_AVAILABLE = False
+    print("PyMuPDF (fitz) not available. PDF processing features will be limited.")
 from pathlib import Path
 from typing import Optional, List, Tuple
 import re
@@ -32,6 +38,9 @@ class PDFProcessor:
     
     def open(self) -> bool:
         """Open the PDF document."""
+        if not FITZ_AVAILABLE:
+            print("Cannot open PDF: PyMuPDF not available.")
+            return False
         try:
             self.doc = fitz.open(self.pdf_path)
             return True
@@ -189,16 +198,8 @@ class PDFProcessor:
     ) -> Optional[Path]:
         """
         Extract specific pages into a new PDF.
-        
-        Args:
-            start_page: Starting page (0-indexed)
-            end_page: Ending page (inclusive, 0-indexed)
-            output_filename: Name for the output file
-        
-        Returns:
-            Path to the generated PDF, or None if failed
         """
-        if not self.doc:
+        if not FITZ_AVAILABLE or not self.doc:
             return None
         
         try:
@@ -260,9 +261,10 @@ def create_bilingual_theme_pdf(
 ) -> Optional[Path]:
     """
     Create a bilingual PDF with theme content in both Uzbek and Russian.
-    
-    The output will have Uzbek pages first, then Russian pages.
     """
+    if not FITZ_AVAILABLE:
+        return None
+        
     try:
         merged_doc = fitz.open()
         
