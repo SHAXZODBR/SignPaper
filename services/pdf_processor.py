@@ -10,6 +10,14 @@ try:
 except ImportError:
     FITZ_AVAILABLE = False
     print("PyMuPDF (fitz) not available. PDF processing features will be limited.")
+
+try:
+    import pypdf
+    PYPDF_AVAILABLE = True
+except ImportError:
+    PYPDF_AVAILABLE = False
+    print("pypdf not available. Pure python fallback disabled.")
+
 from pathlib import Path
 from typing import Optional, List, Tuple
 import re
@@ -39,8 +47,9 @@ class PDFProcessor:
     def open(self) -> bool:
         """Open the PDF document."""
         if not FITZ_AVAILABLE:
-            print("Cannot open PDF: PyMuPDF not available.")
-            return False
+            print("Cannot open PDF: PyMuPDF not available (using pypdf).")
+            # If PYPDF is available, we can still process PDFs without opening self.doc
+            return PYPDF_AVAILABLE
         try:
             self.doc = fitz.open(self.pdf_path)
             return True
@@ -199,55 +208,88 @@ class PDFProcessor:
         """
         Extract specific pages into a new PDF.
         """
-        if not FITZ_AVAILABLE or not self.doc:
-            return None
+        output_path = OUTPUT_DIR / output_filename
         
-        try:
-            new_doc = fitz.open()
-            new_doc.insert_pdf(
-                self.doc, 
-                from_page=start_page, 
-                to_page=end_page
-            )
-            
-            output_path = OUTPUT_DIR / output_filename
-            new_doc.save(output_path)
-            new_doc.close()
-            
-            return output_path
-        except Exception as e:
-            print(f"Error extracting theme PDF: {e}")
-            return None
+        # Try PyMuPDF first if available
+        if FITZ_AVAILABLE and self.doc:
+            try:
+                new_doc = fitz.open()
+                new_doc.insert_pdf(
+                    self.doc, 
+                    from_page=start_page, 
+                    to_page=end_page
+                )
+                
+                new_doc.save(output_path)
+                new_doc.close()
+                return output_path
+            except Exception as e:
+                print(f"Error extracting theme PDF (fitz): {e}")
+
+        # Fallback to pure Python pypdf
+        if PYPDF_AVAILABLE:
+            try:
+                from pypdf import PdfReader, PdfWriter
+                
+                reader = PdfReader(str(self.pdf_path))
+                writer = PdfWriter()
+                
+                # Handle bounds safely
+                actual_end = min(end_page, len(reader.pages) - 1)
+                for i in range(start_page, actual_end + 1):
+                    writer.add_page(reader.pages[i])
+                    
+                with open(output_path, "wb") as f:
+                    writer.write(f)
+                    
+                return output_path
+            except Exception as e:
+                print(f"Error extracting theme PDF (pypdf): {e}")
+                
+        return None
     
     @staticmethod
     def merge_pdfs(pdf_paths: List[Path], output_filename: str) -> Optional[Path]:
         """
         Merge multiple PDFs into one.
-        
-        Args:
-            pdf_paths: List of paths to PDFs to merge
-            output_filename: Name for the output file
-        
-        Returns:
-            Path to the merged PDF, or None if failed
         """
-        try:
-            merged_doc = fitz.open()
-            
-            for pdf_path in pdf_paths:
-                if pdf_path.exists():
-                    doc = fitz.open(pdf_path)
-                    merged_doc.insert_pdf(doc)
-                    doc.close()
-            
-            output_path = OUTPUT_DIR / output_filename
-            merged_doc.save(output_path)
-            merged_doc.close()
-            
-            return output_path
-        except Exception as e:
-            print(f"Error merging PDFs: {e}")
-            return None
+        output_path = OUTPUT_DIR / output_filename
+        
+        # Try PyMuPDF
+        if FITZ_AVAILABLE:
+            try:
+                merged_doc = fitz.open()
+                for pdf_path in pdf_paths:
+                    if pdf_path.exists():
+                        doc = fitz.open(pdf_path)
+                        merged_doc.insert_pdf(doc)
+                        doc.close()
+                merged_doc.save(output_path)
+                merged_doc.close()
+                return output_path
+            except Exception as e:
+                print(f"Error merging PDFs (fitz): {e}")
+
+        # Fallback to pure Python pypdf
+        if PYPDF_AVAILABLE:
+            try:
+                from pypdf import PdfReader, PdfWriter
+                writer = PdfWriter()
+                
+                for pdf_path in pdf_paths:
+                    if pdf_path.exists():
+                        reader = PdfReader(str(pdf_path))
+                        for page in reader.pages:
+                            writer.add_page(page)
+                            
+                with open(output_path, "wb") as f:
+                    writer.write(f)
+                    
+                return output_path
+            except Exception as e:
+                print(f"Error merging PDFs (pypdf): {e}")
+                
+        return None
 
 
 def create_bilingual_theme_pdf(
@@ -262,32 +304,60 @@ def create_bilingual_theme_pdf(
     """
     Create a bilingual PDF with theme content in both Uzbek and Russian.
     """
-    if not FITZ_AVAILABLE:
-        return None
-        
-    try:
-        merged_doc = fitz.open()
-        
-        # Add Uzbek pages
-        if Path(uz_pdf_path).exists():
-            uz_doc = fitz.open(uz_pdf_path)
-            merged_doc.insert_pdf(uz_doc, from_page=uz_start, to_page=uz_end)
-            uz_doc.close()
-        
-        # Add Russian pages
-        if Path(ru_pdf_path).exists():
-            ru_doc = fitz.open(ru_pdf_path)
-            merged_doc.insert_pdf(ru_doc, from_page=ru_start, to_page=ru_end)
-            ru_doc.close()
-        
-        output_path = OUTPUT_DIR / output_filename
-        merged_doc.save(output_path)
-        merged_doc.close()
-        
-        return output_path
-    except Exception as e:
-        print(f"Error creating bilingual PDF: {e}")
-        return None
+    output_path = OUTPUT_DIR / output_filename
+    
+    # Try PyMuPDF
+    if FITZ_AVAILABLE:
+        try:
+            merged_doc = fitz.open()
+            
+            # Add Uzbek pages
+            if Path(uz_pdf_path).exists():
+                uz_doc = fitz.open(uz_pdf_path)
+                merged_doc.insert_pdf(uz_doc, from_page=uz_start, to_page=uz_end)
+                uz_doc.close()
+            
+            # Add Russian pages
+            if Path(ru_pdf_path).exists():
+                ru_doc = fitz.open(ru_pdf_path)
+                merged_doc.insert_pdf(ru_doc, from_page=ru_start, to_page=ru_end)
+                ru_doc.close()
+            
+            merged_doc.save(output_path)
+            merged_doc.close()
+            
+            return output_path
+        except Exception as e:
+            print(f"Error creating bilingual PDF (fitz): {e}")
+
+    # Fallback to pure Python pypdf
+    if PYPDF_AVAILABLE:
+        try:
+            from pypdf import PdfReader, PdfWriter
+            writer = PdfWriter()
+            
+            # Add Uzbek pages
+            if Path(uz_pdf_path).exists():
+                reader = PdfReader(str(uz_pdf_path))
+                actual_end = min(uz_end, len(reader.pages) - 1)
+                for i in range(uz_start, actual_end + 1):
+                    writer.add_page(reader.pages[i])
+                    
+            # Add Russian pages
+            if Path(ru_pdf_path).exists():
+                reader = PdfReader(str(ru_pdf_path))
+                actual_end = min(ru_end, len(reader.pages) - 1)
+                for i in range(ru_start, actual_end + 1):
+                    writer.add_page(reader.pages[i])
+                    
+            with open(output_path, "wb") as f:
+                writer.write(f)
+                
+            return output_path
+        except Exception as e:
+            print(f"Error creating bilingual PDF (pypdf): {e}")
+            
+    return None
 
 
 if __name__ == "__main__":
