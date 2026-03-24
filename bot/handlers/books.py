@@ -185,14 +185,17 @@ async def handle_book_selection(update: Update, context: ContextTypes.DEFAULT_TY
         name = name[:35] + '...' if len(name) > 35 else name
         keyboard.append([InlineKeyboardButton(f"📑 {name}", callback_data=f"theme_{theme['id']}")])
     
-    # PDF download buttons - check if available for current language
-    has_pdf = (lang == 'uz' and book.get('pdf_path_uz')) or (lang == 'ru' and book.get('pdf_path_ru'))
+    # PDF download buttons - check if available for current language (prioritize URL)
+    has_pdf = (lang == 'uz' and (book.get('pdf_url_uz') or book.get('pdf_path_uz'))) or \
+              (lang == 'ru' and (book.get('pdf_url_ru') or book.get('pdf_path_ru')))
+              
     if has_pdf:
         keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', lang, lang_upper=lang.upper()), callback_data=f"dl_book_{book['id']}_{lang}")])
     
     # Add alternative language PDF if available
     alt_lang = 'ru' if lang == 'uz' else 'uz'
-    has_alt_pdf = (alt_lang == 'uz' and book.get('pdf_path_uz')) or (alt_lang == 'ru' and book.get('pdf_path_ru'))
+    has_alt_pdf = (alt_lang == 'uz' and (book.get('pdf_url_uz') or book.get('pdf_path_uz'))) or \
+                  (alt_lang == 'ru' and (book.get('pdf_url_ru') or book.get('pdf_path_ru')))
     if has_alt_pdf:
         keyboard.append([InlineKeyboardButton(get_text('download_full_pdf', alt_lang, lang_upper=alt_lang.upper()), callback_data=f"dl_book_{book['id']}_{alt_lang}")])
 
@@ -239,13 +242,24 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
         telegram_user_id=user_id
     )
     
-    # Try to get PDF URL from Supabase Storage first
-    pdf_url = book.get('pdf_path_uz') if language == 'uz' else book.get('pdf_path_ru')
+    # Try to get PDF URL from Supabase Storage first (pdf_url prioritized over pdf_path)
+    pdf_url = book.get('pdf_url_uz') if language == 'uz' else book.get('pdf_url_ru')
+    if not pdf_url:
+        # Fallback to pdf_path if it's an HTTP link
+        path_val = book.get('pdf_path_uz') if language == 'uz' else book.get('pdf_path_ru')
+        if isinstance(path_val, str) and path_val.startswith('http'):
+            pdf_url = path_val
+            
     actual_lang = language
     
     # Fallback to other language URL if not available
     if not pdf_url:
-        alt_url = book.get('pdf_path_ru') if language == 'uz' else book.get('pdf_path_uz')
+        alt_url = book.get('pdf_url_ru') if language == 'uz' else book.get('pdf_url_uz')
+        if not alt_url:
+            alt_path = book.get('pdf_path_ru') if language == 'uz' else book.get('pdf_path_uz')
+            if isinstance(alt_path, str) and alt_path.startswith('http'):
+                alt_url = alt_path
+        
         if alt_url:
             pdf_url = alt_url
             actual_lang = 'ru' if language == 'uz' else 'uz'
@@ -385,13 +399,13 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
     
     print(f"[PDF DEBUG] Book: {book.get('title_uz')}, PDF UZ: {book.get('pdf_path_uz')}")
     
-    # Determine which PDF to use
+    # Determine which PDF to use (prioritize pdf_url)
     if req_lang == 'uz':
-        pdf_path = book.get('pdf_path_uz')
+        pdf_path = book.get('pdf_url_uz') or book.get('pdf_path_uz')
         lang_name = get_text("uzbek_language", user_lang)
         emoji = "🇺🇿"
     else:
-        pdf_path = book.get('pdf_path_ru')
+        pdf_path = book.get('pdf_url_ru') or book.get('pdf_path_ru')
         lang_name = get_text("russian_language", user_lang)
         emoji = "🇷🇺"
     

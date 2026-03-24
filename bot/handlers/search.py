@@ -242,9 +242,9 @@ async def handle_theme_selection(update: Update, context: ContextTypes.DEFAULT_T
         InlineKeyboardButton(get_text('ai_quiz', lang), callback_data=f"ai_quiz_{theme_id}"),
     ])
     
-    # Check if PDF URLs are available
-    has_uz_pdf = bool(book and book.get('pdf_path_uz'))
-    has_ru_pdf = bool(book and book.get('pdf_path_ru'))
+    # Check if PDF URLs are available (prioritize pdf_url)
+    has_uz_pdf = bool(book and (book.get('pdf_url_uz') or book.get('pdf_path_uz')))
+    has_ru_pdf = bool(book and (book.get('pdf_url_ru') or book.get('pdf_path_ru')))
     
     # Download buttons
     download_row = []
