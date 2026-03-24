@@ -3,6 +3,7 @@ Supabase Client Service
 Handles all database operations with Supabase.
 """
 import os
+import difflib
 from typing import List, Optional, Dict, Any
 from functools import lru_cache
 from supabase import create_client, Client
@@ -284,9 +285,30 @@ def _fallback_search(
             name_uz = (theme.get("name_uz") or "").lower()
             name_ru = (theme.get("name_ru") or "").lower()
             
-            # NEW matching logic: All words must be present (in any order)
-            match_uz = all(w in name_uz for w in words)
-            match_ru = all(w in name_ru for w in words)
+            # Fuzzy word matching: Each query word must match a word in the theme name
+            # Or be very close to it (fuzzy)
+            def fuzzy_match(query_words, target_text):
+                target_words = target_text.split()
+                for qw in query_words:
+                    found = False
+                    for tw in target_words:
+                        tw = tw.lower().strip(".,()!?:;\"'")
+                        # Check for exact match or high similarity
+                        if qw in tw or tw in qw:
+                            found = True
+                            break
+                        # Fuzzy check for small typos (1 char diff for short words, 2 for long)
+                        if len(qw) > 3:
+                            ratio = difflib.SequenceMatcher(None, qw, tw).ratio()
+                            if ratio > 0.8: # Close enough
+                                found = True
+                                break
+                    if not found:
+                        return False
+                return True
+            
+            match_uz = fuzzy_match(words, name_uz)
+            match_ru = fuzzy_match(words, name_ru)
             
             if match_uz or match_ru:
                 # Calculate relevance score
