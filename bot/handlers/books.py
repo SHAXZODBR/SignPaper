@@ -10,6 +10,7 @@ import sys
 import subprocess
 import aiohttp
 import tempfile
+import io
 sys.path.append('../..')
 from bot.translations import get_text
 try:
@@ -28,8 +29,12 @@ except ImportError:
     def get_user_lang(uid): return 'uz' # Default to Uzbek if Supabase client not available
 
 from services.pdf_processor import PDFProcessor, create_bilingual_theme_pdf
-from config import OUTPUT_DIR
+from config import OUTPUT_DIR, SUPABASE_URL, SUPABASE_KEY
+from supabase import create_client
 from typing import Optional
+
+# Initialize Supabase client for storage checks
+sb_client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 
@@ -394,51 +399,106 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
     
     print(f"[PDF DEBUG] PDF path: {pdf_path}")
     
-    # Support for Supabase Storage URLs (Always download for extraction if not local)
-    temp_pdf_path = None
-    if pdf_path and pdf_path.startswith('http'):
-        print(f"[PDF DEBUG] Downloading book PDF from URL for extraction: {pdf_path}")
-        loading_msg = await query.message.reply_text(get_text("downloading_book_for_extraction", user_lang))
+async def download_temp_pdf(url: str, query: Update, user_lang: str) -> Optional[str]:
+    """Download a PDF from URL to a temporary file and return the path."""
+    try:
+        temp_dir = Path("data/temp_books")
+        temp_dir.mkdir(parents=True, exist_ok=True)
         
-        try:
-            temp_dir = Path("data/temp_books")
-            temp_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Use filename as unique identifier for caching
-            filename = pdf_path.split('/')[-1]
-            temp_pdf_path = temp_dir / filename
-            
-            if not temp_pdf_path.exists():
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(pdf_path, timeout=aiohttp.ClientTimeout(total=300)) as resp:
-                        if resp.status == 200:
-                            content = await resp.read()
-                            with open(temp_pdf_path, 'wb') as f:
-                                f.write(content)
-                        else:
-                            raise Exception(f"Failed to download book: {resp.status}")
-            
-            pdf_path = str(temp_pdf_path)
+        filename = url.split('/')[-1]
+        temp_pdf_path = temp_dir / filename
+        
+        if not temp_pdf_path.exists():
+            loading_msg = await query.message.reply_text(get_text("downloading_book_for_extraction", user_lang))
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=300)) as resp:
+                    if resp.status == 200:
+                        content = await resp.read()
+                        with open(temp_pdf_path, 'wb') as f:
+                            f.write(content)
+                    else:
+                        raise Exception(f"Failed to download book: {resp.status}")
             try: await loading_msg.delete()
             except: pass
-        except Exception as e:
-            try: await loading_msg.delete()
-            except: pass
-            await query.message.reply_text(get_text("book_download_failed", user_lang, error_message=str(e)))
-            return
             
-    if not pdf_path or not Path(pdf_path).exists():
-        # Final attempt: Resolve URL from DB if not already tried
-        if not pdf_path or not pdf_path.startswith('http'):
-            pdf_url = book.get('pdf_url_uz') if req_lang == 'uz' else book.get('pdf_url_ru')
-            if pdf_url:
-                # Recursive call with the URL would be cleaner but let's just repeat the download logic or simple redirect
-                # For now, we already did the sync, so pdf_path should be secondary to pdf_url
-                pass
+        return str(temp_pdf_path)
+    except Exception as e:
+        await query.message.reply_text(get_text("book_download_failed", user_lang, error_message=str(e)))
+        return None
 
-        print(f"[PDF DEBUG] PDF file not found at: {pdf_path}")
-        await query.message.reply_text(get_text("pdf_file_missing", user_lang, lang_name=lang_name))
+async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle theme PDF extraction and download."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    user_lang = get_user_lang(user_id)
+    
+    data = query.data # theme_pdf_uz_123
+    parts = data.split('_')
+    req_lang = parts[2]
+    theme_id = int(parts[3])
+    
+    emoji = "🇺🇿" if req_lang == 'uz' else "🇷🇺"
+    lang_name = "O'zbek" if req_lang == 'uz' else "Rus"
+    
+    theme = get_theme_by_id(theme_id)
+    if not theme:
+        await query.message.reply_text(get_text("theme_not_found", user_lang))
         return
+        
+    book = get_book_by_id(theme.get('book_id'))
+    if not book:
+        await query.message.reply_text(get_text("book_not_found", user_lang))
+        return
+        
+    # Get the correct PDF path (URL or Local)
+    pdf_path = book.get(f'pdf_url_{req_lang}') or book.get(f'pdf_path_{req_lang}')
+    
+    # Ensure we have a local path if it's already a URL
+    if pdf_path and pdf_path.startswith('http'):
+        pdf_path = await download_temp_pdf(pdf_path, query, user_lang)
+        if not pdf_path: return
+    cloud_path = f"theme_cuts/{theme_id}.pdf"
+    try:
+        # We use the public URL to check existence or just try to send it
+        cache_url = sb_client.storage.from_("books").get_public_url(cloud_path)
+        
+        # Check if file exists in storage using list (fastest way to check existence)
+        storage_check = sb_client.storage.from_("books").list("theme_cuts", {"search": f"{theme_id}.pdf"})
+        if storage_check and any(f['name'] == f"{theme_id}.pdf" for f in storage_check):
+            print(f"[PDF CACHE] Found cached theme PDF: {cloud_path}")
+            
+            # Send the cached URL directly as a document
+            async with aiohttp.ClientSession() as session:
+                async with session.get(cache_url) as resp:
+                    if resp.status == 200:
+                        pdf_data = await resp.read()
+                        pdf_file = io.BytesIO(pdf_data)
+                        pdf_file.name = f"theme_{theme_id}.pdf"
+                        
+                        await query.message.reply_document(
+                            document=pdf_file,
+                            filename=f"theme_{theme_id}.pdf",
+                            caption=get_text("theme_pdf_caption", user_lang, emoji=emoji, theme_name=theme.get('name_uz') or theme.get('name_ru'), start_page=(theme.get('start_page') or 0)+1, end_page=(theme.get('end_page') or 0)+1, book_title=(book.get('title_uz') or book.get('title_ru'))),
+                            read_timeout=120
+                        )
+                        return
+
+    except Exception as e:
+        print(f"[PDF CACHE] Cache check failed: {e}")
+
+    # 2. IF NOT CACHED, ENSURE WE HAVE THE PDF
+    if not pdf_path or not Path(pdf_path).exists():
+        # Last ditch effort to get URL from DB if not already downloaded
+        pdf_url = book.get('pdf_url_uz') if req_lang == 'uz' else book.get('pdf_url_ru')
+        if pdf_url and pdf_url.startswith('http'):
+            # This shouldn't normally happen as it's handled above, but for safety:
+            pdf_path = await download_temp_pdf(pdf_url, query, user_lang)
+            if not pdf_path: return # Error already sent
+        else:
+            await query.message.reply_text(get_text("pdf_file_missing", user_lang))
+            return
     
     # Generate filename
     theme_name = (theme.get('name_uz') if req_lang == 'uz' else theme.get('name_ru')) or f"theme_{theme_id}"
@@ -468,6 +528,18 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
                     await query.message.reply_text(get_text("pdf_too_large", user_lang, file_size=f"{file_size_mb:.1f}"))
                     return
                 
+                # UPLOAD TO CACHE
+                try:
+                    with open(output_path, 'rb') as f:
+                        sb_client.storage.from_("books").upload(
+                            path=cloud_path,
+                            file=f,
+                            file_options={"content-type": "application/pdf"}
+                        )
+                    print(f"[PDF CACHE] Uploaded to {cloud_path}")
+                except Exception as upload_err:
+                    print(f"[PDF CACHE] Upload failed: {upload_err}")
+
                 start_page = (theme.get('start_page') or 0) + 1
                 end_page = (theme.get('end_page') or 0) + 1
                 await query.message.reply_document(

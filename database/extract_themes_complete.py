@@ -1,86 +1,23 @@
-"""
-Complete Theme Extraction for SignPaper
-Extracts proper themes from PDFs with:
-- Real chapter names from PDF content
-- Correct page ranges
-- Full text content for search
-"""
 import os
-import sys
 import re
+import sys
 from pathlib import Path
-
-if sys.platform == 'win32':
-    import codecs
-    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'replace')
-
-import fitz  # PyMuPDF
+import fitz
+import requests
 from supabase import create_client
 from dotenv import load_dotenv
 
-load_dotenv()
+# Add project root to sys.path
+sys.path.append(str(Path(__file__).parent.parent))
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://rhjsndgajlvnhbzwayhc.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
-BOOKS_DIR = Path(__file__).parent.parent / "books"
+# Credentials
+URL = 'https://rhjsndgajlvnhbzwayhc.supabase.co'
+KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoanNuZGdhamx2bmhiendheWhjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTY4NjI4NiwiZXhwIjoyMDgxMjYyMjg2fQ.8Z2t5HSAzm2MOvUpoP0r0EofmBZuFgdaVKwhq3CJc-A'
 
+client = create_client(URL, KEY)
 
-def get_client():
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise ValueError("SUPABASE_URL and SUPABASE_KEY required")
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
-
-
-def find_chapter_title(doc, start_page: int) -> str:
-    """
-    Extract a meaningful chapter title from the first page of a chapter.
-    Looks for headers, numbered sections, or prominent text.
-    """
-    if start_page >= doc.page_count:
-        return None
-    
-    page = doc[start_page]
-    text = page.get_text("text")
-    lines = [l.strip() for l in text.split('\n') if l.strip()]
-    
-    if not lines:
-        return None
-    
-    # Try to find a good title in first 10 lines
-    for line in lines[:10]:
-        # Skip very short or very long lines
-        if len(line) < 5 or len(line) > 100:
-            continue
-        
-        # Skip lines that are just numbers
-        if re.match(r'^[\d\s\.\-]+$', line):
-            continue
-        
-        # Good patterns for chapter titles
-        patterns = [
-            r'^(\d+[\.\-]?\s*.{5,})$',           # "1. Chapter Title" or "1 Chapter Title"
-            r'^(§\s*\d+[\.\-]?\s*.{5,})$',       # § symbol
-            r'^([IVX]+[\.\-]?\s*.{5,})$',        # Roman numerals
-            r'^(\d+\s*-\s*bob[\.:]\s*.+)$',      # "1-bob: Title" (Uzbek)
-            r'^(\d+\s*-\s*глава[\.:]\s*.+)$',   # "1-глава: Title" (Russian)
-            r'^(bob\s*\d+[\.:]\s*.+)$',          # "Bob 1: Title"
-            r'^(глава\s*\d+[\.:]\s*.+)$',        # "Глава 1: Title"
-        ]
-        
-        for pattern in patterns:
-            match = re.match(pattern, line, re.IGNORECASE)
-            if match:
-                title = match.group(1).strip()
-                return title[:80]
-        
-        # If line starts with a letter and is mostly text, likely a title
-        if line[0].isalpha() or line[0].isdigit():
-            alpha_ratio = sum(c.isalpha() or c.isspace() for c in line) / len(line)
-            if alpha_ratio > 0.7 and len(line) > 10:
-                return line[:80]
-    
-    return None
-
+def normalize_text(text):
+    return re.sub(r'\s+', ' ', text).strip()
 
 def extract_text_from_range(doc, start_page: int, end_page: int, max_chars: int = 5000) -> str:
     """Extract text from a page range."""
@@ -99,165 +36,164 @@ def extract_text_from_range(doc, start_page: int, end_page: int, max_chars: int 
     
     return full_text
 
-
-def create_chapters_from_pdf(doc, num_chapters: int = 8) -> list:
+def extract_themes_heuristic(pdf_path):
     """
-    Create chapter divisions from a PDF.
-    Splits PDF evenly and tries to find chapter titles at each division.
+    Heuristically find chapters/themes in a PDF.
+    Returns list of dicts: {'name': str, 'start': int, 'end': int}
     """
-    total_pages = doc.page_count
+    doc = fitz.open(pdf_path)
+    themes = []
     
-    if total_pages < 20:
-        # Very short book - treat as single chapter
-        return [{
-            'start_page': 0,
-            'end_page': total_pages - 1,
-            'title': find_chapter_title(doc, 0) or "Asosiy matn"
-        }]
-    
-    # Calculate pages per chapter
-    pages_per_chapter = total_pages // num_chapters
-    if pages_per_chapter < 10:
-        num_chapters = max(1, total_pages // 15)
-        pages_per_chapter = total_pages // num_chapters
-    
-    chapters = []
-    for i in range(num_chapters):
-        start = i * pages_per_chapter
-        end = (i + 1) * pages_per_chapter - 1 if i < num_chapters - 1 else total_pages - 1
-        
-        # Find title at start of this section
-        title = find_chapter_title(doc, start)
-        if not title:
-            title = f"{i + 1}-bob"  # "Chapter N" in Uzbek
-        
-        chapters.append({
-            'start_page': start,
-            'end_page': end,
-            'title': title
-        })
-    
-    return chapters
+    # 1. Try TOC first
+    toc = doc.get_toc()
+    if toc:
+        for i, (level, title, page) in enumerate(toc):
+            start = page - 1
+            # End is the start of next TOC item or last page
+            end = (toc[i+1][2] - 2) if i < len(toc)-1 else (doc.page_count - 1)
+            themes.append({
+                'name': title,
+                'start': max(0, start),
+                'end': min(doc.page_count - 1, end)
+            })
+        if themes: 
+            doc.close()
+            return themes
 
+    # 2. Heuristic mapping
+    markers = []
+    for page_num in range(doc.page_count):
+        text = doc[page_num].get_text()
+        patterns = [
+            r'(\d+[- ]*bob)', r'(bob[- ]*\d+)',
+            r'(\d+[- ]*глава)', r'(глава[- ]*\d+)',
+            r'(§\s*\d+)',
+            r'([IVX]+\s*bob)', r'(bob\s*[IVX]+)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                lines = text.split('\n')
+                title = match.group(0)
+                for line in lines:
+                    if title in line:
+                        title = normalize_text(line[:80])
+                        break
+                markers.append({'page': page_num, 'name': title})
+                break
+    
+    if not markers:
+        chunk_size = 15
+        for i in range(0, doc.page_count, chunk_size):
+            themes.append({
+                'name': f"{i//chunk_size + 1}-mavzu",
+                'start': i,
+                'end': min(i + chunk_size - 1, doc.page_count - 1)
+            })
+    else:
+        cleaned_markers = []
+        last_page = -10
+        for m in markers:
+            if m['page'] > last_page + 1:
+                cleaned_markers.append(m)
+                last_page = m['page']
+        
+        for i, m in enumerate(cleaned_markers):
+            start = m['page']
+            end = cleaned_markers[i+1]['page'] - 1 if i < len(cleaned_markers)-1 else doc.page_count - 1
+            themes.append({
+                'name': m['name'],
+                'start': start,
+                'end': end
+            })
+            
+    doc.close()
+    return themes
 
 def main():
-    print("=" * 60, flush=True)
-    print("SignPaper - Complete Theme Extraction", flush=True)
-    print("=" * 60, flush=True)
+    print("=" * 60)
+    print("SignPaper - Smart Theme Extraction (Online)")
+    print("=" * 60)
     
-    client = get_client()
+    books = client.table("books").select("*").execute().data
+    print(f"Processing {len(books)} books.")
     
-    # Get all books
-    books_result = client.table("books").select("*").execute()
-    books = books_result.data or []
-    print(f"Found {len(books)} books in database\n", flush=True)
-    
-    themes_added = 0
-    errors = 0
+    total_added = 0
+    temp_dir = Path("data/temp_extraction")
+    temp_dir.mkdir(parents=True, exist_ok=True)
     
     for book in books:
         book_id = book['id']
+        url = book.get('pdf_url_uz') or book.get('pdf_url_ru')
+        is_uz = bool(book.get('pdf_url_uz'))
         subject = book.get('subject', '')
         grade = book.get('grade', 0)
-        title = book.get('title_uz') or book.get('title_ru') or f"{subject} {grade}"
         
-        print(f"\n[{book_id}] {title}", flush=True)
-        
-        # Find PDF file
-        pdf_path_uz = book.get('pdf_path_uz')
-        pdf_path_ru = book.get('pdf_path_ru')
-        
-        pdf_path = None
-        is_uzbek = True
-        
-        if pdf_path_uz and Path(pdf_path_uz).exists():
-            pdf_path = pdf_path_uz
-            is_uzbek = True
-        elif pdf_path_ru and Path(pdf_path_ru).exists():
-            pdf_path = pdf_path_ru
-            is_uzbek = False
-        
-        if not pdf_path:
-            # Try to use URL if local file is missing
-            pdf_url = book.get('pdf_url_uz') or book.get('pdf_url_ru')
-            if pdf_url and pdf_url.startswith('http'):
-                print(f"  Downloading from Supabase: {pdf_url}", flush=True)
-                import requests
-                temp_dir = Path(__file__).parent.parent / "data" / "temp_books"
-                temp_dir.mkdir(parents=True, exist_ok=True)
-                pdf_path = temp_dir / pdf_url.split('/')[-1]
-                
-                if not pdf_path.exists():
-                    resp = requests.get(pdf_url)
-                    if resp.status_code == 200:
-                        with open(pdf_path, 'wb') as f:
-                            f.write(resp.content)
-                        is_uzbek = bool(book.get('pdf_url_uz'))
-                    else:
-                        print(f"  Failed to download: {resp.status_code}", flush=True)
-                        pdf_path = None
-                else:
-                    is_uzbek = bool(book.get('pdf_url_uz'))
-
-        if not pdf_path:
-            print(f"  No PDF file found (local or remote)", flush=True)
+        if not url:
+            print(f"Skipping Book {book_id}: No PDF URL")
             continue
+            
+        print(f"\n[{book_id}] {subject} {grade}-sinf...")
+        
+        pdf_path = temp_dir / f"book_{book_id}.pdf"
         
         try:
-            doc = fitz.open(pdf_path)
-            print(f"  PDF: {doc.page_count} pages", flush=True)
+            if not pdf_path.exists():
+                resp = requests.get(url, timeout=60)
+                if resp.status_code == 200:
+                    with open(pdf_path, 'wb') as f:
+                        f.write(resp.content)
+                else:
+                    print(f"  Download failed: {resp.status_code}")
+                    continue
             
-            # Create chapters
-            chapters = create_chapters_from_pdf(doc, num_chapters=8)
+            themes = extract_themes_heuristic(str(pdf_path))
+            print(f"  Found {len(themes)} distinct themes.")
             
-            for i, chapter in enumerate(chapters):
-                start_page = chapter['start_page']
-                end_page = chapter['end_page']
-                title = chapter['title']
+            # Open PDF for content extraction
+            doc = fitz.open(str(pdf_path))
+            
+            # Cleanup old themes for this book
+            client.table("themes").delete().eq("book_id", book_id).execute()
+            
+            # Prepare batch
+            batch = []
+            for i, t in enumerate(themes):
+                # Extract actual content for search/AI
+                content = extract_text_from_range(doc, t['start'], t['end'])
                 
-                # Extract content
-                content = extract_text_from_range(doc, start_page, end_page)
-                
-                if len(content) < 50:
-                    continue  # Skip empty chapters
-                
-                # Prepare theme data
                 theme_data = {
                     'book_id': book_id,
                     'order_index': i + 1,
-                    'start_page': start_page,
-                    'end_page': end_page,
-                    'chapter_number': str(i + 1),
+                    'start_page': t['start'],
+                    'end_page': t['end'],
+                    'chapter_number': str(i + 1)
                 }
                 
-                if is_uzbek:
-                    theme_data['name_uz'] = title
+                if is_uz:
+                    theme_data['name_uz'] = t['name']
                     theme_data['content_uz'] = content
                 else:
-                    theme_data['name_ru'] = title
+                    theme_data['name_ru'] = t['name']
                     theme_data['content_ru'] = content
                 
-                try:
-                    client.table("themes").insert(theme_data).execute()
-                    themes_added += 1
-                    print(f"  + {title[:50]}... (p.{start_page}-{end_page})", flush=True)
-                except Exception as e:
-                    print(f"  Error inserting: {e}", flush=True)
-                    errors += 1
+                batch.append(theme_data)
+                
+            if batch:
+                # Insert in chunks to avoid large payload errors
+                for i in range(0, len(batch), 50):
+                    client.table("themes").insert(batch[i:i+50]).execute()
+                total_added += len(batch)
+                print(f"  ✅ Re-extracted {len(batch)} themes.")
             
             doc.close()
-            
+                
         except Exception as e:
-            print(f"  Error: {e}", flush=True)
-            errors += 1
-    
-    print("\n" + "=" * 60, flush=True)
-    print(f"Done! Themes added: {themes_added}, Errors: {errors}", flush=True)
-    
-    # Verify
-    result = client.table("themes").select("id", count="exact").execute()
-    print(f"Total themes in database: {result.count}", flush=True)
-
+            print(f"  ❌ Error: {e}")
+            
+    print("\n" + "=" * 60)
+    print(f"COMPLETED! Total themes re-extracted: {total_added}")
 
 if __name__ == "__main__":
     main()
