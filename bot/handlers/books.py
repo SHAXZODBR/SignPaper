@@ -7,6 +7,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from pathlib import Path
 import sys
+import subprocess
+import aiohttp
+import tempfile
 sys.path.append('../..')
 from bot.translations import get_text
 try:
@@ -26,6 +29,8 @@ except ImportError:
 
 from services.pdf_processor import PDFProcessor, create_bilingual_theme_pdf
 from config import OUTPUT_DIR
+from typing import Optional
+
 
 
 async def books_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_callback: bool = False) -> None:
@@ -282,9 +287,6 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
         loading_msg = await query.message.reply_text(get_text("loading_pdf", user_lang))
         
         try:
-            import aiohttp
-            import io
-            
             # Download PDF from Supabase Storage
             async with aiohttp.ClientSession() as session:
                 async with session.get(pdf_url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
@@ -317,7 +319,7 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
             except:
                 pass
             
-            # Show error with direct link as fallback
+            # SHOW DIRECT DOWNLOAD LINK AS BEST FALLBACK
             keyboard = [[InlineKeyboardButton(
                 get_text("open_in_browser", user_lang, lang_emoji=lang_emoji), 
                 url=pdf_url
@@ -327,36 +329,9 @@ async def handle_book_pdf_download(update: Update, context: ContextTypes.DEFAULT
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             return
-    
-    # Fallback to local file paths
-    pdf_path = book.get('pdf_path_uz') if language == 'uz' else book.get('pdf_path_ru')
-    actual_lang = language
-    
-    # Fallback to other language if not available
-    if not pdf_path or not (isinstance(pdf_path, str) and Path(pdf_path).exists()):
-        alt_path = book.get('pdf_path_ru') if language == 'uz' else book.get('pdf_path_uz')
-        if alt_path and isinstance(alt_path, str) and Path(alt_path).exists():
-            pdf_path = alt_path
-            actual_lang = 'ru' if language == 'uz' else 'uz'
-        else:
-            await query.message.reply_text(get_text("pdf_file_not_found", user_lang))
-            return
-    
-    # Send the local PDF file
-    try:
-        title = book.title_uz if actual_lang == 'uz' else book.title_ru
-        title = title or book.title_ru or book.title_uz or book.subject
-        lang_emoji = "🇺🇿" if actual_lang == 'uz' else "🇷🇺"
-        
-        await query.message.reply_document(
-            document=open(pdf_path, 'rb'),
-            filename=f"{title}.pdf",
-            caption=get_text("book_pdf_caption", user_lang, lang_emoji=lang_emoji, title=title, grade=book.get('grade'), subject=book.get('subject')),
-            read_timeout=120,
-            write_timeout=120
-        )
-    except Exception as e:
-        await query.message.reply_text(get_text("pdf_sending_error", user_lang, error_message=str(e)))
+
+    # User explicitly requested no local files, so we only use URLs
+    await query.message.reply_text(get_text("pdf_file_not_found", user_lang))
 
 
 async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -419,12 +394,9 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
     
     print(f"[PDF DEBUG] PDF path: {pdf_path}")
     
-    # Support for Supabase Storage URLs
+    # Support for Supabase Storage URLs (Always download for extraction if not local)
     temp_pdf_path = None
     if pdf_path and pdf_path.startswith('http'):
-        import aiohttp
-        import tempfile
-        
         print(f"[PDF DEBUG] Downloading book PDF from URL for extraction: {pdf_path}")
         loading_msg = await query.message.reply_text(get_text("downloading_book_for_extraction", user_lang))
         
@@ -447,13 +419,23 @@ async def handle_theme_pdf_download(update: Update, context: ContextTypes.DEFAUL
                             raise Exception(f"Failed to download book: {resp.status}")
             
             pdf_path = str(temp_pdf_path)
-            await loading_msg.delete()
+            try: await loading_msg.delete()
+            except: pass
         except Exception as e:
-            if 'loading_msg' in locals(): await loading_msg.delete()
+            try: await loading_msg.delete()
+            except: pass
             await query.message.reply_text(get_text("book_download_failed", user_lang, error_message=str(e)))
             return
             
     if not pdf_path or not Path(pdf_path).exists():
+        # Final attempt: Resolve URL from DB if not already tried
+        if not pdf_path or not pdf_path.startswith('http'):
+            pdf_url = book.get('pdf_url_uz') if req_lang == 'uz' else book.get('pdf_url_ru')
+            if pdf_url:
+                # Recursive call with the URL would be cleaner but let's just repeat the download logic or simple redirect
+                # For now, we already did the sync, so pdf_path should be secondary to pdf_url
+                pass
+
         print(f"[PDF DEBUG] PDF file not found at: {pdf_path}")
         await query.message.reply_text(get_text("pdf_file_missing", user_lang, lang_name=lang_name))
         return

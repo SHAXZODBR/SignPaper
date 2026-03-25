@@ -178,7 +178,29 @@ def main():
             is_uzbek = False
         
         if not pdf_path:
-            print(f"  No PDF file found", flush=True)
+            # Try to use URL if local file is missing
+            pdf_url = book.get('pdf_url_uz') or book.get('pdf_url_ru')
+            if pdf_url and pdf_url.startswith('http'):
+                print(f"  Downloading from Supabase: {pdf_url}", flush=True)
+                import requests
+                temp_dir = Path(__file__).parent.parent / "data" / "temp_books"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                pdf_path = temp_dir / pdf_url.split('/')[-1]
+                
+                if not pdf_path.exists():
+                    resp = requests.get(pdf_url)
+                    if resp.status_code == 200:
+                        with open(pdf_path, 'wb') as f:
+                            f.write(resp.content)
+                        is_uzbek = bool(book.get('pdf_url_uz'))
+                    else:
+                        print(f"  Failed to download: {resp.status_code}", flush=True)
+                        pdf_path = None
+                else:
+                    is_uzbek = bool(book.get('pdf_url_uz'))
+
+        if not pdf_path:
+            print(f"  No PDF file found (local or remote)", flush=True)
             continue
         
         try:
