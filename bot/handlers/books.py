@@ -34,8 +34,8 @@ async def books_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from
     lang = get_user_lang(user_id)
 
     keyboard = [
-        [InlineKeyboardButton(get_text("lang_uz_button", lang), callback_data="set_lang_uz")],
-        [InlineKeyboardButton(get_text("lang_ru_button", lang), callback_data="set_lang_ru")],
+        [InlineKeyboardButton(get_text("lang_uz_button", lang), callback_data="books_lang_uz")],
+        [InlineKeyboardButton(get_text("lang_ru_button", lang), callback_data="books_lang_ru")],
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -62,10 +62,10 @@ async def handle_language_selection(update: Update, context: ContextTypes.DEFAUL
     await query.answer()
     
     callback_data = query.data
-    if not callback_data.startswith('set_lang_'):
+    if not callback_data.startswith('books_lang_'):
         return
     
-    lang = callback_data.replace('set_lang_', '')  # 'uz' or 'ru'
+    lang = callback_data.replace('books_lang_', '')  # 'uz' or 'ru'
     user_id = update.effective_user.id
     
     # Update user's language preference (assuming this is handled by supabase_client or similar)
@@ -105,8 +105,16 @@ async def handle_grade_selection(update: Update, context: ContextTypes.DEFAULT_T
     else:
         grade_range = [int(grade_range_str)] # Should not happen with current buttons
 
-    # Get books for this grade range
-    books = get_books_by_grade(grade_range)
+    # Get books for this grade range (query each grade individually and merge)
+    books = []
+    seen_ids = set()
+    for g in grade_range:
+        grade_books = get_books_by_grade(g)
+        for b in grade_books:
+            bid = b.get('id') if isinstance(b, dict) else getattr(b, 'id', None)
+            if bid and bid not in seen_ids:
+                seen_ids.add(bid)
+                books.append(b)
     
     # Track analytics
     track_user_action(

@@ -295,7 +295,7 @@ async def init_application() -> Application:
     # CALLBACK HANDLERS
     # ═══════════════════════════════════════════════════════════════════
     application.add_handler(CallbackQueryHandler(handle_theme_selection, pattern=r"^theme_\d+$"))
-    application.add_handler(CallbackQueryHandler(handle_language_selection, pattern=r"^lang_(uz|ru)$"))
+    application.add_handler(CallbackQueryHandler(handle_language_selection, pattern=r"^books_lang_"))
     application.add_handler(CallbackQueryHandler(handle_grade_selection, pattern=r"^grade_"))
     application.add_handler(CallbackQueryHandler(handle_book_selection, pattern=r"^book_\d+$"))
     application.add_handler(CallbackQueryHandler(handle_book_pdf_download, pattern=r"^dl_book_"))
