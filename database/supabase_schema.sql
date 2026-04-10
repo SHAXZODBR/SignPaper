@@ -261,12 +261,6 @@ BEGIN
                 WHEN LOWER(t.name_uz) LIKE '%' || LOWER(search_query) || '%' THEN 1000
                 WHEN LOWER(t.name_ru) LIKE '%' || LOWER(search_query) || '%' THEN 1000
                 ELSE 0
-            END +
-            -- Score for content contains query
-            CASE 
-                WHEN LOWER(COALESCE(t.content_uz, '')) LIKE '%' || LOWER(search_query) || '%' THEN 100
-                WHEN LOWER(COALESCE(t.content_ru, '')) LIKE '%' || LOWER(search_query) || '%' THEN 100
-                ELSE 0
             END
         )::REAL AS relevance_score
     FROM themes t
@@ -277,8 +271,6 @@ BEGIN
         AND (
             LOWER(t.name_uz) LIKE '%' || LOWER(search_query) || '%'
             OR LOWER(t.name_ru) LIKE '%' || LOWER(search_query) || '%'
-            OR LOWER(COALESCE(t.content_uz, '')) LIKE '%' || LOWER(search_query) || '%'
-            OR LOWER(COALESCE(t.content_ru, '')) LIKE '%' || LOWER(search_query) || '%'
         )
     ORDER BY relevance_score DESC, t.id
     LIMIT limit_count;

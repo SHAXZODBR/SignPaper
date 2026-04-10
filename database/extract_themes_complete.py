@@ -29,6 +29,8 @@ def extract_text_from_range(doc, start_page: int, end_page: int, max_chars: int 
     
     full_text = "\n".join(text_parts)
     full_text = re.sub(r'\n{3,}', '\n\n', full_text)
+    # Remove NULL bytes which cause Supabase/PostgreSQL errors
+    full_text = full_text.replace('\u0000', '')
     full_text = full_text.strip()
     
     if len(full_text) > max_chars:
@@ -74,11 +76,26 @@ def extract_themes_heuristic(pdf_path):
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                lines = text.split('\n')
+                lines = [l.strip() for l in text.split('\n') if l.strip()]
                 title = match.group(0)
-                for line in lines:
+                
+                # Find the line with the marker and potentially the next 1-2 lines for the full title
+                for idx, line in enumerate(lines):
                     if title in line:
-                        title = normalize_text(line[:80])
+                        # Start with current line
+                        full_title = line
+                        # If the line is very short (just the marker), peek at next lines
+                        if len(line) < 15 and idx + 1 < len(lines):
+                            next_line = lines[idx+1]
+                            # Only append if it looks like a title (not too long, not just numbers)
+                            if len(next_line) < 100 and not next_line.isdigit():
+                                full_title = f"{line} {next_line}"
+                                if idx + 2 < len(lines) and len(full_title) < 40:
+                                    third_line = lines[idx+2]
+                                    if len(third_line) < 60:
+                                        full_title = f"{full_title} {third_line}"
+                        
+                        title = normalize_text(full_title[:150])
                         break
                 markers.append({'page': page_num, 'name': title})
                 break

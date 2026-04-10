@@ -26,7 +26,7 @@ import io
 sys.path.append('..')
 from config import OUTPUT_DIR
 
-# OCR imports (optional - graceful fallback if not installed)
+# OCR and alternative extraction imports (optional - graceful fallback if not installed)
 try:
     from pdf2image import convert_from_path
     import pytesseract
@@ -35,6 +35,13 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
     print("OCR libraries not available. Install with: pip install pdf2image pytesseract")
+
+try:
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    PDFPLUMBER_AVAILABLE = False
+    print("pdfplumber not available. Alternative extraction disabled.")
 
 
 class PDFProcessor:
@@ -69,16 +76,9 @@ class PDFProcessor:
             return 0
         return len(self.doc)
     
-    def extract_text(self, start_page: int = 0, end_page: Optional[int] = None) -> str:
+    def extract_text(self, start_page: int = 0, end_page: Optional[int] = None, use_ocr: bool = True) -> str:
         """
-        Extract text from PDF pages.
-        
-        Args:
-            start_page: Starting page (0-indexed)
-            end_page: Ending page (inclusive, 0-indexed). None means last page.
-        
-        Returns:
-            Extracted text as string
+        Extract text from PDF pages using multiple methods and OCR fallback.
         """
         if not self.doc:
             return ""
@@ -89,42 +89,92 @@ class PDFProcessor:
         text_parts = []
         for page_num in range(start_page, min(end_page + 1, len(self.doc))):
             page = self.doc[page_num]
-            # Try different extraction methods
+            
+            # Method 1: Standard text extraction
             text = page.get_text("text")
             
-            # If text is mostly garbage (non-printable chars), try "blocks" method
+            # Method 2: If standard fails, try blocks
             if self._is_garbled_text(text):
-                text = page.get_text("blocks")
-                if isinstance(text, list):
-                    text = "\n".join([block[4] for block in text if len(block) > 4 and isinstance(block[4], str)])
+                blocks = page.get_text("blocks")
+                if blocks:
+                    text = "\n".join([b[4] for b in blocks if len(b) > 4 and isinstance(b[4], str)])
+            
+            # Method 3: OCR Fallback if still garbled/empty and requested
+            if use_ocr and OCR_AVAILABLE and self._is_garbled_text(text):
+                ocr_text = self.extract_text_via_ocr(page_num)
+                if ocr_text:
+                    text = ocr_text
+            
+            # Method 4: pdfplumber fallback if still garbled/empty and available
+            if self._is_garbled_text(text) and PDFPLUMBER_AVAILABLE:
+                plumber_text = self.extract_text_via_pdfplumber(page_num)
+                if plumber_text:
+                    text = plumber_text
             
             # Clean the extracted text
             text = self._clean_text(text)
             text_parts.append(text)
         
         return "\n".join(text_parts)
+
+    def extract_text_via_ocr(self, page_num: int) -> str:
+        """Extract text from a single page using OCR."""
+        if not OCR_AVAILABLE:
+            return ""
+        
+        try:
+            # Convert page to image
+            # We use a relatively high DPI for better OCR
+            images = convert_from_path(
+                str(self.pdf_path),
+                first_page=page_num + 1,
+                last_page=page_num + 1,
+                dpi=300
+            )
+            
+            if not images:
+                return ""
+            
+            # Run OCR on the image
+            # Try multiple languages if possible (Uzbek/Russian)
+            # Tesseract lang codes: rus, uzb
+            text = pytesseract.image_to_string(images[0], lang='rus+uzb+eng')
+            return text
+        except Exception as e:
+            print(f"OCR error on page {page_num}: {e}")
+            return ""
+
+    def extract_text_via_pdfplumber(self, page_num: int) -> str:
+        """Extract text from a single page using pdfplumber."""
+        if not PDFPLUMBER_AVAILABLE:
+            return ""
+        
+        try:
+            with pdfplumber.open(self.pdf_path) as pdf:
+                page = pdf.pages[page_num]
+                return page.extract_text() or ""
+        except Exception as e:
+            print(f"pdfplumber error on page {page_num}: {e}")
+            return ""
     
     def _is_garbled_text(self, text: str) -> bool:
-        """Check if text appears to be garbled/unreadable."""
-        if not text or len(text) < 10:
+        """Check if text appears to be garbled/unreadable or empty."""
+        if not text:
+            return True
+            
+        clean_text = text.strip()
+        if len(clean_text) < 20: # Very little text is often a sign of an image/scanned page
             return True
         
         # Count readable characters (ASCII letters, Cyrillic, digits, common punctuation)
         readable = 0
-        for char in text:
-            # ASCII letters and digits
-            if char.isalnum():
-                readable += 1
-            # Cyrillic characters
-            elif '\u0400' <= char <= '\u04FF':
-                readable += 1
-            # Common punctuation and whitespace
-            elif char in ' \n\t.,!?;:-()[]{}\'\"':
+        for char in clean_text:
+            if char.isalnum() or '\u0400' <= char <= '\u04FF' or char in ' \n\t.,!?;:-()[]{}\'\"':
                 readable += 1
         
-        # If less than 30% of characters are readable, consider it garbled
-        ratio = readable / len(text) if text else 0
-        return ratio < 0.3
+        # If less than 40% of characters are readable, consider it garbled
+        ratio = readable / len(clean_text) if clean_text else 0
+        return ratio < 0.4
     
     def _clean_text(self, text: str) -> str:
         """Clean extracted text by removing control characters and normalizing whitespace."""

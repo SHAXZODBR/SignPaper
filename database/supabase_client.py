@@ -258,13 +258,14 @@ def _fallback_search(
             
         # Broad search: find anything matching the FIRST word in Supabase
         first_word = words[0]
+        # Search ONLY in names
         filter_str = f"name_uz.ilike.%{first_word}%,name_ru.ilike.%{first_word}%"
         
         base_query = client.table("themes").select(
             "id, book_id, name_uz, name_ru, start_page, end_page, is_active, books(subject, grade, title_uz, title_ru, is_active)"
         ).eq("is_active", True)
         
-        # Add broad name filter
+        # Add name filter
         base_query = base_query.or_(filter_str)
         
         # We need to fetch enough to filter locally
@@ -312,8 +313,9 @@ def _fallback_search(
             
             if match_uz or match_ru:
                 # Calculate relevance score
-                # Exact phrase match gets higher score
-                score = 1000
+                score = 1000 # Name matches
+                
+                # Exact phrase match booster
                 if query.lower() in name_uz or query.lower() in name_ru:
                     score += 500
                 

@@ -180,18 +180,13 @@ class SearchEngine:
             for theme in themes:
                 name_uz = (theme.name_uz or '').lower()
                 name_ru = (theme.name_ru or '').lower()
-                content_uz = (theme.content_uz or '').lower()
-                content_ru = (theme.content_ru or '').lower()
                 
-                # Check for matches in name or content
+                # Check for matches in name only
                 in_name_uz = query_lower in name_uz
                 in_name_ru = query_lower in name_ru
-                in_content_uz = query_lower in content_uz
-                in_content_ru = query_lower in content_ru
-                in_content = in_content_uz or in_content_ru
                 
-                # Skip if no match anywhere
-                if not (in_name_uz or in_name_ru or in_content):
+                # Skip if no match in name
+                if not (in_name_uz or in_name_ru):
                     continue
                 
                 # Get book info
@@ -209,10 +204,10 @@ class SearchEngine:
                 
                 # Language bonus: prefer results in the same language as query
                 if query_lang == 'ru':
-                    if in_name_ru or in_content_ru:
+                    if in_name_ru:
                         lang_bonus = 500  # Boost Russian results for Russian queries
                 else:
-                    if in_name_uz or in_content_uz:
+                    if in_name_uz:
                         lang_bonus = 500  # Boost Uzbek results for Uzbek queries
                 
                 if name_uz == query_lower or name_ru == query_lower:
@@ -221,14 +216,12 @@ class SearchEngine:
                     score = 5000   # Name starts with query
                 elif in_name_uz or in_name_ru:
                     score = 1000   # Query found in name
-                elif in_content:
-                    score = 100    # Query found in content only
                 
                 score += lang_bonus
                 
                 # Determine which language had the match
                 match_lang = 'uz'
-                if in_name_ru or in_content_ru:
+                if in_name_ru:
                     match_lang = 'ru'
                 
                 results.append({
@@ -243,7 +236,7 @@ class SearchEngine:
                     'start_page': theme.start_page,
                     'end_page': theme.end_page,
                     'score': score,
-                    'match_type': 'name' if (in_name_uz or in_name_ru) else 'content',
+                    'match_type': 'name',
                     'match_lang': match_lang,
                     'query_lang': query_lang
                 })
